@@ -1,0 +1,266 @@
+const pool = require('../config/db');
+const { isProposalLocked, canCloseProposalDeal } = require('./dealClose');
+
+async function getMatchForEngagement(proposalId) {
+  const [rows] = await pool.query(
+    `SELECT * FROM mm_matches WHERE engagement_proposal_id = ? LIMIT 1`,
+    [proposalId]
+  );
+  return rows[0] || null;
+}
+
+async function isMatchEngagementStakeholder(userId, proposalId) {
+  const [rows] = await pool.query(
+    `SELECT m.id FROM mm_matches m
+     LEFT JOIN mm_proposals sa ON sa.id = m.side_a_proposal_id
+     LEFT JOIN mm_proposals sb ON sb.id = m.side_b_proposal_id
+     WHERE m.engagement_proposal_id = ?
+       AND (
+         m.matched_by = ?
+         OR sa.forwarded_to = ?
+         OR sb.forwarded_to = ?
+         OR sa.reviewed_by = ?
+         OR sb.reviewed_by = ?
+       )
+     LIMIT 1`,
+    [proposalId, userId, userId, userId, userId, userId]
+  );
+  return rows.length > 0;
+}
+
+/** @deprecated use isMatchEngagementStakeholder */
+async function hasRfpApprovedMatchAccess(userId, proposalId) {
+  return isMatchEngagementStakeholder(userId, proposalId);
+}
+
+async function sectorLeadCanAccessProposal(req, proposal) {
+  if (proposal.status === 'draft') {
+    return false;
+  }
+  if (proposal.sector === req.user.sector) {
+    return { ok: true, viaMatchmaking: false };
+  }
+  const matched = await getMatchForEngagement(proposal.id);
+  if (matched && matched.matched_by === req.user.id) {
+    return { ok: true, viaMatchmaking: true };
+  }
+  return { ok: false };
+}
+
+async function checkProposalAccess(req, proposal) {
+  if (!proposal) {
+    return { error: 'Proposal not found', status: 404 };
+  }
+
+  if (req.user.role === 'super_admin') {
+    return { ok: true, proposal };
+  }
+
+  if (req.user.role === 'party_a') {
+    if (proposal.party_a_id !== req.user.id) {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, proposal };
+  }
+
+  if (req.user.role === 'party_b') {
+    if (proposal.party_b_user_id !== req.user.id) {
+      return { error: 'Access denied', status: 403 };
+    }
+    if (proposal.status === 'draft') {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, proposal };
+  }
+
+  if (req.user.role === 'investor') {
+    if (proposal.party_b_user_id !== req.user.id) {
+      return { error: 'Access denied', status: 403 };
+    }
+    if (proposal.status === 'draft') {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, proposal };
+  }
+
+  if (req.user.role === 'sector_lead') {
+    if (!req.user.sector) {
+      return { error: 'Sector lead profile has no sector assigned', status: 400 };
+    }
+    const slAccess = await sectorLeadCanAccessProposal(req, proposal);
+    if (!slAccess.ok) {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, proposal, viaMatchmaking: slAccess.viaMatchmaking };
+  }
+
+  if (['regional_focal_point', 'focal_point'].includes(req.user.role)) {
+    if (proposal.status !== 'approved') {
+      return { error: 'Access denied — engagement not active', status: 403 };
+    }
+    const allowed = await isMatchEngagementStakeholder(req.user.id, proposal.id);
+    if (!allowed) {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, proposal, readOnly: true };
+  }
+
+  return { error: 'Access denied', status: 403 };
+}
+
+async function checkApprovedPartyChatAccess(user, proposal) {
+  if (!proposal) {
+    return { error: 'Proposal not found', status: 404 };
+  }
+
+  if (proposal.status !== 'approved') {
+    return { error: 'Chat is only available after proposal approval', status: 403 };
+  }
+
+  if (!proposal.party_b_user_id) {
+    return { error: 'Party B is not linked to this proposal yet', status: 403 };
+  }
+
+  if (user.role === 'party_a' && proposal.party_a_id === user.id) {
+    return { ok: true, proposal, canSend: true };
+  }
+
+  if (user.role === 'party_b' && proposal.party_b_user_id === user.id) {
+    return { ok: true, proposal, canSend: true };
+  }
+
+  if (user.role === 'investor' && proposal.party_b_user_id === user.id) {
+    return { ok: true, proposal, canSend: true };
+  }
+
+  if (user.role === 'super_admin') {
+    return { ok: true, proposal, canSend: true };
+  }
+
+  if (user.role === 'sector_lead') {
+    if (!user.sector) {
+      return { error: 'Sector lead profile has no sector assigned', status: 400 };
+    }
+    if (proposal.sector === user.sector) {
+      return { ok: true, proposal, canSend: true };
+    }
+    const match = await getMatchForEngagement(proposal.id);
+    if (match && match.matched_by === user.id) {
+      return { ok: true, proposal, canSend: true };
+    }
+    return { error: 'Access denied — proposal is outside your sector', status: 403 };
+  }
+
+  if (['regional_focal_point', 'focal_point'].includes(user.role)) {
+    const allowed = await isMatchEngagementStakeholder(user.id, proposal.id);
+    if (!allowed) {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, proposal, canSend: false };
+  }
+
+  return { error: 'Access denied', status: 403 };
+}
+
+function isProposalOwnerForActivities(req, proposal) {
+  if (req.user.role === 'party_a') {
+    return proposal.party_a_id === req.user.id;
+  }
+  if (req.user.role === 'party_b') {
+    return proposal.party_b_user_id === req.user.id;
+  }
+  return false;
+}
+
+function chatReady(proposal) {
+  return proposal.status === 'approved' && !!proposal.party_b_user_id;
+}
+
+function buildProposalCapabilities(req, proposal, access) {
+  const caps = {
+    can_view_chat: false,
+    can_send_chat: false,
+    can_add_activity: false,
+    can_upload_mou: false,
+    can_view_mou: false,
+    can_close_deal: false,
+  };
+
+  if (!access.ok) return caps;
+
+  const role = req.user.role;
+  const ready = chatReady(proposal);
+  const locked = isProposalLocked(proposal);
+  const approvedAndOpen = proposal.status === 'approved' && !locked;
+  const mouVisible = proposal.status === 'approved' || proposal.status === 'completed';
+
+  if (role === 'party_a' && proposal.party_a_id === req.user.id) {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_add_activity = approvedAndOpen;
+    caps.can_upload_mou = approvedAndOpen;
+    caps.can_view_mou = mouVisible;
+    return caps;
+  }
+
+  if (role === 'party_b' && proposal.party_b_user_id === req.user.id) {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_upload_mou = approvedAndOpen;
+    caps.can_view_mou = mouVisible;
+    return caps;
+  }
+
+  if (role === 'investor' && proposal.party_b_user_id === req.user.id) {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_view_mou = mouVisible;
+    return caps;
+  }
+
+  const sectorLeadAllowed =
+    role === 'sector_lead' &&
+    proposal.status !== 'draft' &&
+    (proposal.sector === req.user.sector || access.viaMatchmaking);
+
+  if (sectorLeadAllowed) {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_add_activity = approvedAndOpen;
+    caps.can_upload_mou = approvedAndOpen;
+    caps.can_view_mou = mouVisible;
+    caps.can_close_deal = canCloseProposalDeal(req, proposal);
+    return caps;
+  }
+
+  if (role === 'super_admin') {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_add_activity = approvedAndOpen;
+    caps.can_upload_mou = approvedAndOpen;
+    caps.can_view_mou = mouVisible;
+    caps.can_close_deal = canCloseProposalDeal(req, proposal);
+    return caps;
+  }
+
+  if (['regional_focal_point', 'focal_point'].includes(role) && access.readOnly && mouVisible) {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = false;
+    caps.can_add_activity = false;
+    caps.can_upload_mou = false;
+    caps.can_view_mou = true;
+    return caps;
+  }
+
+  return caps;
+}
+
+module.exports = {
+  checkProposalAccess,
+  checkApprovedPartyChatAccess,
+  isProposalOwnerForActivities,
+  hasRfpApprovedMatchAccess,
+  isMatchEngagementStakeholder,
+  getMatchForEngagement,
+  buildProposalCapabilities,
+};
