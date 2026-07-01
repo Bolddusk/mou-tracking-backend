@@ -37,6 +37,8 @@
     "db:import:islamabad-agri-fruit-mous": "node server/scripts/importIslamabadAgriFruitMous.js",
     "db:import:islamabad-agri-fisheries-mous": "node server/scripts/importIslamabadAgriFisheriesMous.js",
     "db:backfill:islamabad-agri-inputs-sector": "node server/scripts/backfillIslamabadAgriInputsSector.js",
+    "db:backfill:islamabad-conference-fields": "node server/scripts/backfillIslamabadConferenceFields.js",
+    "db:check:imported-mous": "node server/scripts/checkImportedMouCounts.js",
     "db:migrate:mou-file-versions": "node server/scripts/migrateMouFileVersions.js",
     "db:migrate:deal-closed": "node server/scripts/migrateDealClosed.js",
     "db:migrate:proposal-resubmit": "node server/scripts/migrateProposalResubmit.js",
