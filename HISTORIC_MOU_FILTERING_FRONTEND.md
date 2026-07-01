@@ -156,6 +156,11 @@ GET /api/proposals/filter-options
 {
   "proposal_statuses": ["draft", "submitted", "approved", "rejected", "resubmitted", "completed"],
   "mou_statuses": ["not_started", "in_progress", "uploaded", "signed", "deal_closed"],
+  "cooperation_modes": [
+    { "value": "mou", "label": "MoU" },
+    { "value": "jv", "label": "JV" },
+    { "value": "agreement", "label": "Agreement" }
+  ],
   "sectors": [
     "Agri-chemicals & Inputs",
     "Agri Technology & Precision Agriculture Solutions",
@@ -189,16 +194,18 @@ GET /api/proposals/all
 | `has_mou` | boolean | `true` | MOU file uploaded |
 | `has_pitch` | boolean | `true` | Proposal/pitch file uploaded |
 | `deal_closed` | boolean | `true` | MOU deal closed or proposal completed |
+| `cooperation_mode` | string | `mou` | Mode of cooperation: `mou`, `jv`, or `agreement` |
 
 **Example requests:**
 
 ```
 GET /api/proposals/all
 GET /api/proposals/all?status=approved
+GET /api/proposals/all?cooperation_mode=jv
 GET /api/proposals/all?sector=Agri-chemicals%20%26%20Inputs&mou_status=uploaded
 GET /api/proposals/all?q=Khan&has_mou=true
 GET /api/proposals/all?date_from=2024-06-01&date_to=2024-06-30&deal_closed=false
-GET /api/proposals/all?status=approved&sector=Agri-chemicals%20%26%20Inputs&mou_status=signed&has_pitch=true
+GET /api/proposals/all?status=approved&cooperation_mode=mou&sector=Agri-chemicals%20%26%20Inputs
 ```
 
 **Response:** same array shape as before (proposal objects with poke status, display_title, etc.)
@@ -218,7 +225,7 @@ GET /api/proposals/all?status=approved&sector=Agri-chemicals%20%26%20Inputs&mou_
 ## 5. Suggested Super Admin filter bar UI
 
 ```
-[ Search: title, party, sector...     ]  [Sector ▼]  [Status ▼]  [MOU Status ▼]
+[ Search: title, party, sector...     ]  [Sector ▼]  [Status ▼]  [MOU Status ▼]  [Cooperation Mode ▼]
 
 [ Has MOU ▼ ]  [ Has Pitch ▼ ]  [ Deal Closed ▼ ]  [ From date ]  [ To date ]  [Clear]
 ```
@@ -245,6 +252,30 @@ On any filter change → rebuild query string → `GET /api/proposals/all?...`
 | `deal_closed` | Deal closed by SL/SA |
 
 List items already include `mou_status` on each proposal row from `GET /all`.
+
+---
+
+## 9. Historic Agri MOU Excel import (backend one-time)
+
+Import 43 Hangzhou Agriculture conference MOUs from Excel:
+
+```bash
+npm run db:migrate:cooperation-mode
+npm run db:import:agri-signed-mous
+```
+
+Imported proposals include:
+- `cooperation_mode`: `mou` | `jv` | `agreement`
+- `investment_value_usd`, `mou_sub_sector`, `jurisdiction`, `signed_copy_status`
+- `external_reference`: e.g. `HANGZHOU-AGRI-126` (re-run skips duplicates)
+- `mou_ack_exempt = 1`, `status = approved`, `mou_status = signed` (when signed copy = Yes)
+
+Optional env:
+```env
+IMPORT_PARTY_A_EMAIL=superadmin@test.com
+IMPORT_SECTOR_LEAD_EMAIL=sectorlead@test.com
+AGRI_MOU_EXCEL_PATH=./Revised Copy of Final Agri MOU List 15.06.2026.xlsx
+```
 
 ---
 

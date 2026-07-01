@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const { getPublicFileUrl } = require('../middleware/upload');
 const {
-  SECTORS,
+  getActiveSectorNames,
   ALLOWED_DOC_TYPES,
   MANDATORY_DOC_TYPES,
   parseSectors,
@@ -12,6 +12,7 @@ const {
   pickProfileUpdates,
   hasValue,
 } = require('../utils/partyAProfile');
+const { ensureSectorCache } = require('../utils/sectorRegistry');
 const { assertCanViewPartyAProfile, getPartyAUser } = require('../utils/partyAProfileAccess');
 
 function formatUserSummary(user) {
@@ -45,6 +46,8 @@ async function getDocuments(userId) {
 }
 
 async function buildProfileResponse(userId, options = {}) {
+  await ensureSectorCache();
+  const availableSectors = getActiveSectorNames();
   const [rows] = await pool.query('SELECT * FROM party_a_profiles WHERE user_id = ?', [userId]);
   const profile = formatProfileRow(rows[0]) || emptyProfile(userId);
   const documents = await getDocuments(userId);
@@ -54,7 +57,7 @@ async function buildProfileResponse(userId, options = {}) {
     profile,
     documents,
     completion,
-    available_sectors: SECTORS,
+    available_sectors: availableSectors,
   };
 
   if (options.user) {
@@ -175,14 +178,22 @@ async function listPartyAProfiles(req, res) {
 }
 
 async function getSectors(req, res) {
-  return res.json({ sectors: SECTORS });
+  try {
+    await ensureSectorCache();
+    return res.json({ sectors: getActiveSectorNames() });
+  } catch (err) {
+    console.error('Get profile sectors error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch sectors' });
+  }
 }
 
 async function updateProfile(req, res) {
   try {
+    await ensureSectorCache();
+    const allowedSectors = getActiveSectorNames();
     const updates = pickProfileUpdates(req.body);
     if (req.body.sectors !== undefined) {
-      const parsed = parseSectors(req.body.sectors);
+      const parsed = parseSectors(req.body.sectors, allowedSectors);
       if (parsed.error) {
         return res.status(400).json({ error: parsed.error });
       }

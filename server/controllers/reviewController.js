@@ -6,10 +6,15 @@ const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const {
   PROPOSAL_STATUSES,
   MOU_STATUSES,
-  SECTORS,
+  COOPERATION_MODES,
+  COOPERATION_MODE_LABELS,
+  getActiveSectorNames,
+  PROPOSAL_LIST_FROM_SQL,
+  parsePagination,
   validateProposalListQuery,
   buildProposalListWhere,
 } = require('../utils/proposalListFilters');
+const { ensureSectorCache } = require('../utils/sectorRegistry');
 
 const PROPOSAL_SELECT = `
   SELECT
@@ -63,18 +68,44 @@ async function getSectorLeadProposals(req, res) {
 
 async function getAllProposals(req, res) {
   try {
-    const validationErrors = validateProposalListQuery(req.query);
+    await ensureSectorCache();
+    const validationErrors = validateProposalListQuery(req.query, getActiveSectorNames());
     if (validationErrors.length) {
       return res.status(400).json({ error: validationErrors[0] });
     }
 
+    const { page, limit, offset } = parsePagination(req.query);
     const { sql, params } = buildProposalListWhere(req.query);
-    const query = `${PROPOSAL_SELECT}${sql} ORDER BY p.created_at DESC`;
 
-    const [rows] = await pool.query(query, params);
+    const countQuery = `SELECT COUNT(*) AS total ${PROPOSAL_LIST_FROM_SQL}${sql}`;
+    const [[countRow]] = await pool.query(countQuery, params);
+    const total = Number(countRow.total) || 0;
+    const totalPages = total ? Math.ceil(total / limit) : 0;
+
+    const dataQuery = `${PROPOSAL_SELECT}${sql} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?`;
+    const [rows] = await pool.query(dataQuery, [...params, limit, offset]);
     const enriched = enrichProposals(rows);
     const withPoke = await attachPokeStatus(enriched);
-    return res.json(withPoke);
+
+    return res.json({
+      data: withPoke,
+      pagination: {
+        page,
+        limit,
+        total,
+        total_pages: totalPages,
+        has_next: page < totalPages,
+        has_prev: page > 1,
+      },
+      filters: {
+        conference_key: req.query.conference_key || null,
+        cooperation_mode: req.query.cooperation_mode || null,
+        status: req.query.status || null,
+        sector: req.query.sector || null,
+        mou_status: req.query.mou_status || null,
+        q: req.query.q || null,
+      },
+    });
   } catch (err) {
     console.error('All proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
@@ -83,10 +114,43 @@ async function getAllProposals(req, res) {
 
 async function getProposalFilterOptions(req, res) {
   try {
+    await ensureSectorCache();
+    const activeSectors = getActiveSectorNames();
+    const [conferences] = await pool.query(
+      `SELECT
+         conference_key,
+         conference_name,
+         COUNT(*) AS proposal_count,
+         SUM(cooperation_mode = 'mou') AS mou_count,
+         SUM(cooperation_mode = 'jv') AS jv_count,
+         SUM(cooperation_mode = 'agreement') AS agreement_count
+       FROM proposals
+       WHERE conference_key IS NOT NULL AND conference_name IS NOT NULL
+       GROUP BY conference_key, conference_name
+       ORDER BY conference_name ASC`
+    );
+
     return res.json({
       proposal_statuses: PROPOSAL_STATUSES,
       mou_statuses: MOU_STATUSES,
-      sectors: SECTORS,
+      cooperation_modes: COOPERATION_MODES.map((value) => ({
+        value,
+        label: COOPERATION_MODE_LABELS[value],
+      })),
+      conferences: conferences.map((row) => ({
+        key: row.conference_key,
+        name: row.conference_name,
+        proposal_count: Number(row.proposal_count),
+        mou_count: Number(row.mou_count),
+        jv_count: Number(row.jv_count),
+        agreement_count: Number(row.agreement_count),
+      })),
+      sectors: activeSectors,
+      pagination_defaults: {
+        page: 1,
+        limit: 20,
+        max_limit: 100,
+      },
     });
   } catch (err) {
     console.error('Proposal filter options error:', err.message);

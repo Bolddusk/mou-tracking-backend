@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { SECTORS } = require('../constants/sectors');
+const { getActiveSectorNames, ensureSectorCache } = require('../utils/sectorRegistry');
 
 const COMPLAINT_CLOSED = ['resolved', 'rejected'];
 const MM_PROPOSAL_CLOSED = ['matched', 'rejected'];
@@ -14,6 +14,8 @@ async function getSectorLeadById(userId) {
 
 async function reassignSectorLead(req, res) {
   try {
+    await ensureSectorCache();
+    const activeSectors = getActiveSectorNames();
     const sector = String(req.body.sector || '').trim();
     const newSlUserId = Number(req.body.new_sl_user_id);
     const reason = req.body.reason?.trim() || null;
@@ -24,8 +26,8 @@ async function reassignSectorLead(req, res) {
     if (!newSlUserId) {
       return res.status(400).json({ error: 'new_sl_user_id is required' });
     }
-    if (!SECTORS.includes(sector)) {
-      return res.status(400).json({ error: `Invalid sector. Allowed: ${SECTORS.join(', ')}` });
+    if (!activeSectors.includes(sector)) {
+      return res.status(400).json({ error: `Invalid sector. Allowed: ${activeSectors.join(', ')}` });
     }
 
     const newSl = await getSectorLeadById(newSlUserId);

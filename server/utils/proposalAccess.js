@@ -118,6 +118,33 @@ async function checkApprovedPartyChatAccess(user, proposal) {
   }
 
   if (!proposal.party_b_user_id) {
+    if (isHistoricExemptProposal(proposal)) {
+      if (user.role === 'super_admin') {
+        return { ok: true, proposal, canSend: true };
+      }
+
+      if (user.role === 'sector_lead') {
+        if (!user.sector) {
+          return { error: 'Sector lead profile has no sector assigned', status: 400 };
+        }
+        if (proposal.sector === user.sector) {
+          return { ok: true, proposal, canSend: true };
+        }
+        return { error: 'Access denied — proposal is outside your sector', status: 403 };
+      }
+
+      if (user.role === 'party_a' && proposal.party_a_id === user.id) {
+        return { ok: true, proposal, canSend: true };
+      }
+
+      if (['regional_focal_point', 'focal_point'].includes(user.role)) {
+        const allowed = await isMatchEngagementStakeholder(user.id, proposal.id);
+        if (allowed) {
+          return { ok: true, proposal, canSend: false };
+        }
+      }
+    }
+
     return { error: 'Party B is not linked to this proposal yet', status: 403 };
   }
 
@@ -172,8 +199,15 @@ function isProposalOwnerForActivities(req, proposal) {
   return false;
 }
 
+function isHistoricExemptProposal(proposal) {
+  return Boolean(proposal?.mou_ack_exempt);
+}
+
 function chatReady(proposal) {
-  return proposal.status === 'approved' && !!proposal.party_b_user_id;
+  if (proposal.status !== 'approved') return false;
+  if (proposal.party_b_user_id) return true;
+  if (isHistoricExemptProposal(proposal)) return true;
+  return false;
 }
 
 function buildProposalCapabilities(req, proposal, access) {
@@ -184,6 +218,7 @@ function buildProposalCapabilities(req, proposal, access) {
     can_upload_mou: false,
     can_view_mou: false,
     can_close_deal: false,
+    can_edit_party_contacts: false,
   };
 
   if (!access.ok) return caps;
@@ -230,6 +265,7 @@ function buildProposalCapabilities(req, proposal, access) {
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
     caps.can_close_deal = canCloseProposalDeal(req, proposal);
+    caps.can_edit_party_contacts = true;
     return caps;
   }
 
@@ -240,6 +276,7 @@ function buildProposalCapabilities(req, proposal, access) {
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
     caps.can_close_deal = canCloseProposalDeal(req, proposal);
+    caps.can_edit_party_contacts = proposal.status !== 'draft';
     return caps;
   }
 

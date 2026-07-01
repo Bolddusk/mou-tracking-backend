@@ -1,4 +1,4 @@
-const { SECTORS } = require('../constants/sectors');
+const { getActiveSectorNames } = require('./sectorRegistry');
 
 const MANDATORY_DOC_TYPES = new Set(['fbr_certificate', 'secp_certificate']);
 const ALLOWED_DOC_TYPES = new Set(['fbr_certificate', 'secp_certificate', 'other']);
@@ -10,7 +10,7 @@ function hasValue(value) {
   return true;
 }
 
-function parseSectors(input) {
+function parseSectors(input, allowedSectors = getActiveSectorNames()) {
   if (input === undefined || input === null) return undefined;
   let list = input;
   if (typeof input === 'string') {
@@ -23,7 +23,7 @@ function parseSectors(input) {
   if (!Array.isArray(list)) {
     return { error: 'sectors must be an array of sector names' };
   }
-  const invalid = list.filter((s) => !SECTORS.includes(s));
+  const invalid = list.filter((s) => !allowedSectors.includes(s));
   if (invalid.length) {
     return { error: `Invalid sector(s): ${invalid.join(', ')}` };
   }
@@ -183,7 +183,7 @@ function pickProfileUpdates(body) {
 }
 
 module.exports = {
-  SECTORS,
+  getActiveSectorNames,
   MANDATORY_DOC_TYPES,
   ALLOWED_DOC_TYPES,
   hasValue,

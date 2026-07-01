@@ -14,10 +14,18 @@ const {
   uploadFiling,
   deleteFiling,
 } = require('../controllers/complianceFilingsController');
+const {
+  adminListSectors,
+  adminGetSector,
+  adminCreateSector,
+  adminUpdateSector,
+  adminDeleteSector,
+} = require('../controllers/sectorController');
 
 const router = express.Router();
 
 const superAdmin = [verifyToken, requireRole('super_admin')];
+const adminRoles = [verifyToken, requireRole('super_admin', 'admin')];
 
 router.patch('/sector-lead/reassign', ...superAdmin, reassignSectorLead);
 router.get('/sector-lead/reassignments', ...superAdmin, getReassignments);
@@ -35,5 +43,11 @@ router.post(
   uploadFiling
 );
 router.delete('/compliance-filings/:id', ...superAdmin, deleteFiling);
+
+router.get('/sectors', ...adminRoles, adminListSectors);
+router.get('/sectors/:id', ...adminRoles, adminGetSector);
+router.post('/sectors', ...adminRoles, adminCreateSector);
+router.patch('/sectors/:id', ...adminRoles, adminUpdateSector);
+router.delete('/sectors/:id', ...adminRoles, adminDeleteSector);
 
 module.exports = router;

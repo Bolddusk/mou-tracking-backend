@@ -1,7 +1,20 @@
-const { SECTORS } = require('../constants/sectors');
+const {
+  COOPERATION_MODES,
+  COOPERATION_MODE_LABELS,
+} = require('../constants/cooperationModes');
+const { getActiveSectorNames } = require('./sectorRegistry');
 
 const PROPOSAL_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'resubmitted', 'completed'];
 const MOU_STATUSES = ['not_started', 'in_progress', 'uploaded', 'signed', 'deal_closed'];
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+const PROPOSAL_LIST_FROM_SQL = `
+  FROM proposals p
+  JOIN users pa ON pa.id = p.party_a_id
+  LEFT JOIN users rv ON rv.id = p.reviewed_by
+`;
 
 const RESOLVED_MOU_STATUS_SQL = `COALESCE(
   NULLIF(p.mou_status, 'not_started'),
@@ -24,17 +37,33 @@ function isValidDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value));
 }
 
-function validateProposalListQuery(query) {
+function parsePagination(query) {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || DEFAULT_PAGE);
+  const limit = Math.min(
+    MAX_LIMIT,
+    Math.max(1, Number.parseInt(query.limit, 10) || DEFAULT_LIMIT)
+  );
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
+function validateProposalListQuery(query, activeSectors = getActiveSectorNames()) {
   const errors = [];
 
   if (query.status && !PROPOSAL_STATUSES.includes(query.status)) {
     errors.push('Invalid status filter');
   }
-  if (query.sector && !SECTORS.includes(query.sector)) {
+  if (query.sector && !activeSectors.includes(query.sector)) {
     errors.push('Invalid sector filter');
   }
   if (query.mou_status && !MOU_STATUSES.includes(query.mou_status)) {
     errors.push('Invalid mou_status filter');
+  }
+  if (query.cooperation_mode && !COOPERATION_MODES.includes(query.cooperation_mode)) {
+    errors.push('Invalid cooperation_mode filter');
+  }
+  if (query.conference_key && String(query.conference_key).trim().length > 80) {
+    errors.push('Invalid conference_key filter');
   }
   if (query.date_from && !isValidDate(query.date_from)) {
     errors.push('Invalid date_from — use YYYY-MM-DD');
@@ -71,6 +100,16 @@ function buildProposalListWhere(query) {
     params.push(query.mou_status);
   }
 
+  if (query.cooperation_mode) {
+    conditions.push('p.cooperation_mode = ?');
+    params.push(query.cooperation_mode);
+  }
+
+  if (query.conference_key) {
+    conditions.push('p.conference_key = ?');
+    params.push(String(query.conference_key).trim());
+  }
+
   if (query.q && String(query.q).trim()) {
     const term = `%${String(query.q).trim()}%`;
     conditions.push(`(
@@ -82,8 +121,11 @@ function buildProposalListWhere(query) {
       OR p.party_b_name LIKE ?
       OR p.party_b_organization LIKE ?
       OR p.sector LIKE ?
+      OR p.mou_sub_sector LIKE ?
+      OR p.jurisdiction LIKE ?
+      OR p.conference_name LIKE ?
     )`);
-    params.push(term, term, term, term, term, term, term, term);
+    params.push(term, term, term, term, term, term, term, term, term, term, term);
   }
 
   if (query.date_from) {
@@ -130,7 +172,14 @@ function buildProposalListWhere(query) {
 module.exports = {
   PROPOSAL_STATUSES,
   MOU_STATUSES,
-  SECTORS,
+  COOPERATION_MODES,
+  COOPERATION_MODE_LABELS,
+  getActiveSectorNames,
+  DEFAULT_PAGE,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  PROPOSAL_LIST_FROM_SQL,
+  parsePagination,
   validateProposalListQuery,
   buildProposalListWhere,
 };

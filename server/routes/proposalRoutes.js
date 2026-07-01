@@ -26,6 +26,7 @@ const { getProposalChatMessages } = require('../controllers/proposalChatControll
 const { exportProposalReport } = require('../controllers/proposalReportController');
 const { getProposalMou, saveProposalMou, getProposalMouStatus, acknowledgeProposalMou, getProposalMouVersions } = require('../controllers/proposalMouController');
 const { closeProposalDeal } = require('../controllers/dealCloseController');
+const { updateProposalPartyContacts } = require('../controllers/proposalPartyContactController');
 
 const router = express.Router();
 
@@ -78,6 +79,7 @@ router.post('/:proposalId/poke', ...reviewerRoles, pokeForUpdate);
 // Proposal review
 router.patch('/:id/approve', ...reviewerRoles, approveProposal);
 router.patch('/:id/reject', ...reviewerRoles, rejectProposal);
+router.patch('/:id/party-contacts', ...reviewerRoles, updateProposalPartyContacts);
 
 // Export report (sector lead / super admin) — before /:id
 router.get('/:id/export-report', ...reviewerRoles, exportProposalReport);
