@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const { getPublicFileUrl } = require('../middleware/upload');
 const { enrichProposalRow } = require('../utils/proposalTemplate');
-const { resolveSignedStatus } = require('../utils/mouAcknowledgment');
+const { resolveSignedStatus, isMouAckExempt } = require('../utils/mouAcknowledgment');
 const {
   shouldResetAckOnNewFile,
   getNextVersionNumber,
@@ -415,6 +415,12 @@ async function acknowledgeMatchMou(req, res) {
     const enriched = enrichProposalRow(engagement);
     if (!enriched.mou_file_url) {
       return res.status(400).json({ error: 'MOU file not uploaded yet' });
+    }
+
+    if (isMouAckExempt(match)) {
+      return res.status(400).json({
+        error: 'Acknowledgment is not required for historic MOU records',
+      });
     }
 
     if (req.user.role === 'party_a' && match.mou_ack_by_a) {

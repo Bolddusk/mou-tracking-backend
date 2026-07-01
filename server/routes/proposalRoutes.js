@@ -12,6 +12,7 @@ const {
 const {
   getSectorLeadProposals,
   getAllProposals,
+  getProposalFilterOptions,
   getProposalDetail,
   approveProposal,
   rejectProposal,
@@ -65,6 +66,7 @@ router.delete('/:id', ...proposalAuthorRoles, deleteProposal);
 router.get('/sector-lead', ...sectorLeadOnly, getSectorLeadProposals);
 
 // Super Admin
+router.get('/filter-options', ...superAdminOnly, getProposalFilterOptions);
 router.get('/all', ...superAdminOnly, getAllProposals);
 
 // Activities (before /:id)

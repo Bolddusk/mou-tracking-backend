@@ -3,6 +3,13 @@ const { checkProposalAccess, buildProposalCapabilities } = require('../utils/pro
 const { attachPokeStatus } = require('../utils/pokeStatus');
 const { enrichProposals, enrichProposalRow } = require('../utils/proposalTemplate');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
+const {
+  PROPOSAL_STATUSES,
+  MOU_STATUSES,
+  SECTORS,
+  validateProposalListQuery,
+  buildProposalListWhere,
+} = require('../utils/proposalListFilters');
 
 const PROPOSAL_SELECT = `
   SELECT
@@ -56,19 +63,13 @@ async function getSectorLeadProposals(req, res) {
 
 async function getAllProposals(req, res) {
   try {
-    let query = PROPOSAL_SELECT;
-    const params = [];
-
-    if (req.query.status) {
-      const allowed = ['draft', 'submitted', 'approved', 'rejected', 'resubmitted', 'completed'];
-      if (!allowed.includes(req.query.status)) {
-        return res.status(400).json({ error: 'Invalid status filter' });
-      }
-      query += ' WHERE p.status = ?';
-      params.push(req.query.status);
+    const validationErrors = validateProposalListQuery(req.query);
+    if (validationErrors.length) {
+      return res.status(400).json({ error: validationErrors[0] });
     }
 
-    query += ' ORDER BY p.created_at DESC';
+    const { sql, params } = buildProposalListWhere(req.query);
+    const query = `${PROPOSAL_SELECT}${sql} ORDER BY p.created_at DESC`;
 
     const [rows] = await pool.query(query, params);
     const enriched = enrichProposals(rows);
@@ -77,6 +78,19 @@ async function getAllProposals(req, res) {
   } catch (err) {
     console.error('All proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
+  }
+}
+
+async function getProposalFilterOptions(req, res) {
+  try {
+    return res.json({
+      proposal_statuses: PROPOSAL_STATUSES,
+      mou_statuses: MOU_STATUSES,
+      sectors: SECTORS,
+    });
+  } catch (err) {
+    console.error('Proposal filter options error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch filter options' });
   }
 }
 
@@ -204,6 +218,7 @@ async function rejectProposal(req, res) {
 module.exports = {
   getSectorLeadProposals,
   getAllProposals,
+  getProposalFilterOptions,
   getProposalDetail,
   approveProposal,
   rejectProposal,

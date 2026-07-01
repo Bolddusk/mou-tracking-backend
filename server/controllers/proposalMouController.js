@@ -5,7 +5,7 @@ const {
   buildProposalCapabilities,
 } = require('../utils/proposalAccess');
 const { enrichProposalRow } = require('../utils/proposalTemplate');
-const { formatMouAckStatus, resolveSignedStatus } = require('../utils/mouAcknowledgment');
+const { formatMouAckStatus, resolveSignedStatus, isMouAckExempt } = require('../utils/mouAcknowledgment');
 const {
   shouldResetAckOnNewFile,
   getNextVersionNumber,
@@ -277,6 +277,13 @@ async function acknowledgeProposalMou(req, res) {
     }
 
     const match = await getMatchForEngagement(proposal.id);
+    const ackSource = match || proposal;
+
+    if (isMouAckExempt(ackSource)) {
+      return res.status(400).json({
+        error: 'Acknowledgment is not required for historic MOU records',
+      });
+    }
 
     if (match) {
       if (req.user.role === 'party_a' && match.mou_ack_by_a) {
