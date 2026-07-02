@@ -70,6 +70,7 @@ const ACTION_PERMISSION_CATALOG = [
   { key: 'proposals.view', group: 'proposals', label: 'View proposal detail', type: 'action' },
   { key: 'proposals.view_own', group: 'proposals', label: 'View own proposals (legacy)', type: 'action', deprecated: true },
   { key: 'proposals.view_detail', group: 'proposals', label: 'View proposal detail (legacy)', type: 'action', deprecated: true },
+  { key: 'proposals.list_own', group: 'proposals', label: 'List own proposals', type: 'action' },
   { key: 'proposals.activities.view', group: 'proposals', label: 'View proposal activities', type: 'action' },
   { key: 'proposals.activities.create', group: 'proposals', label: 'Create proposal activities', type: 'action' },
   { key: 'proposals.messages.view', group: 'proposals', label: 'View proposal chat', type: 'action' },
@@ -348,12 +349,15 @@ function resolveRedirectFromNavigation(user, navigation) {
   return null;
 }
 
-function buildRbacContext(user) {
+function buildRbacContext(user, permissions = []) {
+  const listScope = require('./permissionBundles').resolveProposalsListScope(user, permissions);
   return {
     sector: user.sector || null,
     country: user.country || null,
     scoped_sector: user.role === 'sector_lead' ? user.sector || null : null,
     scoped_country: user.role === 'regional_focal_point' ? user.country || null : null,
+    list_scope: listScope.list_scope,
+    proposals_list_api: listScope.proposals_list_api,
   };
 }
 
@@ -384,13 +388,17 @@ async function buildRbacPayload(user) {
   const rawPermissions = await loadUserPermissions(user);
   const permissions = normalizeClientPermissions(rawPermissions);
   const navigation = buildNavigationFromPermissions(user, rawPermissions);
+  const listScope = require('./permissionBundles').resolveProposalsListScope(user, rawPermissions);
 
   return {
     role: user.role,
     role_label: ROLE_LABELS[user.role] || user.role,
     permissions,
     navigation,
-    context: buildRbacContext(user),
+    context: buildRbacContext(user, rawPermissions),
+    capabilities: {
+      proposals_list_api: listScope.proposals_list_api,
+    },
     redirect: resolveRedirectFromNavigation(user, navigation),
     source: 'database',
     sidebar_nav_count: navigation.reduce((n, s) => n + s.items.length, 0),

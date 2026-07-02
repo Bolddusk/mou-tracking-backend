@@ -32,19 +32,24 @@ const { updateProposalPartyContacts } = require('../controllers/proposalPartyCon
 const router = express.Router();
 
 const proposalAuthorRoles = [verifyToken, requireRole('party_a', 'super_admin')];
-const partyMyProposals = [verifyToken, requireRole('party_a', 'party_b', 'investor')];
-const partyChatRoles = [
-  verifyToken,
-  requireAnyPermission('proposals.messages.view'),
-];
+const partyMyProposals = [verifyToken, requireAnyPermission('proposals.list_own', 'proposals.view_own')];
 const sectorLeadList = [
   verifyToken,
   requireAnyPermission('proposals.list_sector'),
 ];
-const allProposalsList = [verifyToken, requireAnyPermission('nav.opportunities.all', 'proposals.list_all')];
+const allProposalsList = [
+  verifyToken,
+  requireRole('super_admin'),
+  requireAnyPermission('proposals.list_all'),
+];
 const reviewerListRoles = [
   verifyToken,
-  requireAnyPermission('nav.opportunities.all', 'proposals.list_sector', 'proposals.filter_options'),
+  requireAnyPermission(
+    'proposals.list_all',
+    'proposals.list_sector',
+    'proposals.list_own',
+    'proposals.filter_options'
+  ),
 ];
 const approveProposalRoles = [verifyToken, requireAnyPermission('proposals.approve')];
 const rejectProposalRoles = [verifyToken, requireAnyPermission('proposals.reject')];

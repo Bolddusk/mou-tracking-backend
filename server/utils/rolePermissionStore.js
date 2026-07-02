@@ -6,7 +6,7 @@ const {
   OBSOLETE_NAV_KEYS,
   PERMISSION_ALIASES,
 } = require('./rolePermissions');
-const { expandNavGrantsWithMinimumBundles } = require('./permissionBundles');
+const { expandNavGrantsWithMinimumBundles, sanitizeRoleListPermissions } = require('./permissionBundles');
 const { isValidRole } = require('./userHelpers');
 
 let grantsCache = null;
@@ -136,11 +136,13 @@ async function replaceRolePermissions(role, permissionKeys) {
     return { error: validation.error, status: 400 };
   }
 
+  const sanitizedKeys = sanitizeRoleListPermissions(role, validation.keys);
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     await connection.query('DELETE FROM role_permission_grants WHERE role = ?', [role]);
-    for (const permissionKey of validation.keys) {
+    for (const permissionKey of sanitizedKeys) {
       await connection.query(
         'INSERT INTO role_permission_grants (role, permission_key) VALUES (?, ?)',
         [role, permissionKey]
@@ -150,7 +152,7 @@ async function replaceRolePermissions(role, permissionKeys) {
     await refreshGrantsCache();
     return {
       ok: true,
-      permissions: validation.keys,
+      permissions: sanitizedKeys,
       ignored_obsolete: validation.ignored_obsolete,
     };
   } catch (err) {
@@ -170,7 +172,7 @@ async function patchRolePermissions(role, { grant = [], revoke = [] }) {
   const revokeSplit = splitObsoleteAndMapKeys(revoke);
   const ignored_obsolete = [...new Set([...grantSplit.obsolete, ...revokeSplit.obsolete])];
 
-  const expandedGrant = expandNavGrantsWithMinimumBundles(grantSplit.valid);
+  const expandedGrant = expandNavGrantsWithMinimumBundles(grantSplit.valid, role);
   const revokeValid = revokeSplit.valid;
 
   if (!expandedGrant.length && !revokeValid.length && !ignored_obsolete.length) {
@@ -189,7 +191,8 @@ async function patchRolePermissions(role, { grant = [], revoke = [] }) {
   revokeValid.forEach((key) => current.delete(key));
   ignored_obsolete.forEach((key) => current.delete(key));
 
-  const result = await replaceRolePermissions(role, [...current]);
+  const sanitized = sanitizeRoleListPermissions(role, [...current]);
+  const result = await replaceRolePermissions(role, sanitized);
   if (result.ok) {
     result.ignored_obsolete = ignored_obsolete;
   }

@@ -41,7 +41,7 @@ async function grantPermissionBundle(req, res) {
       return res.status(400).json({ error: 'nav_key is required' });
     }
 
-    const resolved = resolveBundleGrantKeys(navKey, level, customPermissions);
+    const resolved = resolveBundleGrantKeys(navKey, level, customPermissions, role);
     if (resolved.error) {
       return res.status(400).json({ error: resolved.error });
     }

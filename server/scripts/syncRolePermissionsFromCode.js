@@ -84,6 +84,33 @@ async function syncFromCode(connection) {
       console.log(`Removed ${removed.affectedRows} obsolete nav permission grants.`);
     }
   }
+
+  const scopeFixes = [
+    { role: 'sector_lead', wrong: 'proposals.list_all', correct: 'proposals.list_sector' },
+    { role: 'sector_lead', wrong: 'proposals.list_own', correct: 'proposals.list_sector' },
+    { role: 'party_a', wrong: 'proposals.list_all', correct: 'proposals.list_own' },
+    { role: 'party_a', wrong: 'proposals.list_sector', correct: 'proposals.list_own' },
+    { role: 'party_b', wrong: 'proposals.list_all', correct: 'proposals.list_own' },
+    { role: 'party_b', wrong: 'proposals.list_sector', correct: 'proposals.list_own' },
+  ];
+  let scopeFixed = 0;
+  for (const { role, wrong, correct } of scopeFixes) {
+    const [deleted] = await connection.query(
+      `DELETE FROM role_permission_grants WHERE role = ? AND permission_key = ?`,
+      [role, wrong]
+    );
+    scopeFixed += deleted.affectedRows;
+    const [added] = await connection.query(
+      `INSERT IGNORE INTO role_permission_grants (role, permission_key)
+       SELECT ?, ? FROM role_permission_grants
+       WHERE role = ? AND permission_key = 'nav.opportunities.all'`,
+      [role, correct, role]
+    );
+    scopeFixed += added.affectedRows;
+  }
+  if (scopeFixed > 0) {
+    console.log(`Fixed ${scopeFixed} opportunities list-scope grants (role-aware).`);
+  }
 }
 
 async function main() {

@@ -10,7 +10,9 @@ const NAV_PERMISSION_BUNDLES = [
     label: 'All Opportunities',
     route: '/dashboard/super-admin',
     list_apis: [
-      { method: 'GET', path: '/api/proposals/all', permission: 'proposals.list_all', required: true },
+      { method: 'GET', path: '/api/proposals/all', permission: 'proposals.list_all', required: true, roles: ['super_admin'] },
+      { method: 'GET', path: '/api/proposals/sector-lead', permission: 'proposals.list_sector', required: true, roles: ['sector_lead'] },
+      { method: 'GET', path: '/api/proposals/my', permission: 'proposals.list_own', required: true, roles: ['party_a', 'party_b'] },
       { method: 'GET', path: '/api/proposals/filter-options', permission: 'proposals.filter_options', required: true },
     ],
     detail_apis: [
@@ -30,29 +32,83 @@ const NAV_PERMISSION_BUNDLES = [
       { permission: 'proposals.mou.upload', label: 'Upload MOU', apis: [{ method: 'PATCH', path: '/api/proposals/:id/mou' }] },
     ],
     default_grant_on_nav: {
-      minimum: [
+      by_role: {
+        super_admin: [
+          'proposals.list_all',
+          'proposals.filter_options',
+          'proposals.view',
+          'proposals.activities.view',
+        ],
+        sector_lead: [
+          'proposals.list_sector',
+          'proposals.filter_options',
+          'proposals.view',
+          'proposals.activities.view',
+        ],
+        party_a: [
+          'proposals.list_own',
+          'proposals.filter_options',
+          'proposals.view',
+          'proposals.activities.view',
+        ],
+        party_b: [
+          'proposals.list_own',
+          'proposals.filter_options',
+          'proposals.view',
+          'proposals.activities.view',
+        ],
+      },
+      suggested: ['proposals.messages.view', 'proposals.mou.view'],
+    },
+    full_grant_on_nav_by_role: {
+      super_admin: [
         'proposals.list_all',
         'proposals.filter_options',
         'proposals.view',
         'proposals.activities.view',
+        'proposals.messages.view',
+        'proposals.mou.view',
+        'proposals.approve',
+        'proposals.reject',
+        'proposals.export',
+        'proposals.edit_contacts',
+        'proposals.deal_close',
+        'proposals.activities.create',
+        'proposals.mou.upload',
       ],
-      suggested: ['proposals.messages.view', 'proposals.mou.view'],
+      sector_lead: [
+        'proposals.list_sector',
+        'proposals.filter_options',
+        'proposals.view',
+        'proposals.activities.view',
+        'proposals.messages.view',
+        'proposals.mou.view',
+        'proposals.approve',
+        'proposals.reject',
+        'proposals.export',
+        'proposals.edit_contacts',
+        'proposals.deal_close',
+        'proposals.activities.create',
+        'proposals.mou.upload',
+      ],
+      party_a: [
+        'proposals.list_own',
+        'proposals.filter_options',
+        'proposals.view',
+        'proposals.activities.view',
+        'proposals.messages.view',
+        'proposals.mou.view',
+        'proposals.mou.upload',
+      ],
+      party_b: [
+        'proposals.list_own',
+        'proposals.filter_options',
+        'proposals.view',
+        'proposals.activities.view',
+        'proposals.mou.view',
+        'proposals.mou.upload',
+      ],
     },
-    full_grant_on_nav: [
-      'proposals.list_all',
-      'proposals.filter_options',
-      'proposals.view',
-      'proposals.activities.view',
-      'proposals.messages.view',
-      'proposals.mou.view',
-      'proposals.approve',
-      'proposals.reject',
-      'proposals.export',
-      'proposals.edit_contacts',
-      'proposals.deal_close',
-      'proposals.activities.create',
-      'proposals.mou.upload',
-    ],
   },
   {
     nav_key: 'nav.proposals.new_direct',
@@ -306,11 +362,72 @@ const BUNDLE_BY_NAV_KEY = Object.fromEntries(
   NAV_PERMISSION_BUNDLES.map((bundle) => [bundle.nav_key, bundle])
 );
 
+const LIST_SCOPE_BY_ROLE = {
+  super_admin: 'proposals.list_all',
+  sector_lead: 'proposals.list_sector',
+  party_a: 'proposals.list_own',
+  party_b: 'proposals.list_own',
+};
+
+const ALL_LIST_SCOPE_KEYS = [
+  'proposals.list_all',
+  'proposals.list_sector',
+  'proposals.list_own',
+];
+
+/** Strip cross-role list grants so list/detail stay in sync. */
+function sanitizeRoleListPermissions(role, permissions = []) {
+  const set = new Set(permissions);
+  const correct = LIST_SCOPE_BY_ROLE[role];
+
+  if (role !== 'super_admin') {
+    set.delete('proposals.list_all');
+  }
+
+  if (!correct || role === 'super_admin') {
+    return [...set];
+  }
+
+  ALL_LIST_SCOPE_KEYS.forEach((key) => {
+    if (key !== correct) set.delete(key);
+  });
+
+  if (set.has('nav.opportunities.all')) {
+    set.add(correct);
+  }
+
+  return [...set];
+}
+
 function getBundleByNavKey(navKey) {
   return BUNDLE_BY_NAV_KEY[navKey] || null;
 }
 
-function resolveBundleGrantKeys(navKey, level = 'minimum', customKeys = []) {
+function getMinimumGrantsForBundle(bundle, role) {
+  const byRole = bundle.default_grant_on_nav?.by_role;
+  if (byRole?.[role]) {
+    return [...byRole[role]];
+  }
+  if (bundle.nav_key === 'nav.opportunities.all') {
+    return [
+      'proposals.list_own',
+      'proposals.filter_options',
+      'proposals.view',
+      'proposals.activities.view',
+    ];
+  }
+  return [...(bundle.default_grant_on_nav?.minimum || [])];
+}
+
+function getFullGrantsForBundle(bundle, role) {
+  const byRole = bundle.full_grant_on_nav_by_role?.[role];
+  if (byRole) {
+    return [...byRole];
+  }
+  return [...(bundle.full_grant_on_nav || [])];
+}
+
+function resolveBundleGrantKeys(navKey, level = 'minimum', customKeys = [], role = null) {
   const bundle = getBundleByNavKey(navKey);
   if (!bundle) {
     return { error: `Unknown nav key: ${navKey}` };
@@ -318,12 +435,15 @@ function resolveBundleGrantKeys(navKey, level = 'minimum', customKeys = []) {
   if (!SIDEBAR_NAV_KEYS.includes(navKey)) {
     return { error: `Not a sidebar nav key: ${navKey}` };
   }
+  if (!role) {
+    return { error: 'role is required for bundle grant resolution' };
+  }
 
   let actionKeys = [];
   if (level === 'minimum') {
-    actionKeys = [...(bundle.default_grant_on_nav?.minimum || [])];
+    actionKeys = getMinimumGrantsForBundle(bundle, role);
   } else if (level === 'full') {
-    actionKeys = [...(bundle.full_grant_on_nav || [])];
+    actionKeys = getFullGrantsForBundle(bundle, role);
   } else if (level === 'custom') {
     if (!Array.isArray(customKeys) || !customKeys.length) {
       return { error: 'custom level requires permissions array' };
@@ -337,16 +457,44 @@ function resolveBundleGrantKeys(navKey, level = 'minimum', customKeys = []) {
   return { grant, bundle };
 }
 
-function expandNavGrantsWithMinimumBundles(grantKeys) {
+function expandNavGrantsWithMinimumBundles(grantKeys, role) {
+  if (!role) return [...grantKeys];
   const expanded = new Set(grantKeys);
   grantKeys.forEach((key) => {
     if (!SIDEBAR_NAV_KEYS.includes(key)) return;
     const bundle = getBundleByNavKey(key);
     if (!bundle) return;
     expanded.add(key);
-    (bundle.default_grant_on_nav?.minimum || []).forEach((p) => expanded.add(p));
+    getMinimumGrantsForBundle(bundle, role).forEach((p) => expanded.add(p));
   });
   return [...expanded];
+}
+
+/** Which proposals list API matches granted list permissions (list/detail same scope). */
+function resolveProposalsListScope(user, permissions = []) {
+  const role = user?.role;
+  const perms = new Set(permissions);
+
+  if (role === 'super_admin' && (perms.has('proposals.list_all') || perms.has('nav.opportunities.all'))) {
+    return { list_scope: 'all', proposals_list_api: '/api/proposals/all' };
+  }
+  if (role === 'sector_lead' && (perms.has('proposals.list_sector') || perms.has('nav.opportunities.all'))) {
+    return { list_scope: 'sector', proposals_list_api: '/api/proposals/sector-lead' };
+  }
+  if (
+    (role === 'party_a' || role === 'party_b') &&
+    (perms.has('proposals.list_own') || perms.has('nav.opportunities.all'))
+  ) {
+    return { list_scope: 'own', proposals_list_api: '/api/proposals/my' };
+  }
+
+  if (perms.has('proposals.list_sector')) {
+    return { list_scope: 'sector', proposals_list_api: '/api/proposals/sector-lead' };
+  }
+  if (perms.has('proposals.list_own')) {
+    return { list_scope: 'own', proposals_list_api: '/api/proposals/my' };
+  }
+  return { list_scope: null, proposals_list_api: null };
 }
 
 function getAllApiPermissionKeys() {
@@ -361,8 +509,13 @@ function getAllApiPermissionKeys() {
 
 module.exports = {
   NAV_PERMISSION_BUNDLES,
+  LIST_SCOPE_BY_ROLE,
   getBundleByNavKey,
+  getMinimumGrantsForBundle,
+  getFullGrantsForBundle,
   resolveBundleGrantKeys,
   expandNavGrantsWithMinimumBundles,
+  sanitizeRoleListPermissions,
+  resolveProposalsListScope,
   getAllApiPermissionKeys,
 };
