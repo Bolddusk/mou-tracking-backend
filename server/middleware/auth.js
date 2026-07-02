@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { hasPermission } = require('../utils/rolePermissions');
 
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -33,4 +34,4 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { verifyToken, requireRole };
+module.exports = { verifyToken, requireRole, hasPermission };

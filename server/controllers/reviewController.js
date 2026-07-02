@@ -1,11 +1,12 @@
 const pool = require('../config/db');
 const { checkProposalAccess, buildProposalCapabilities } = require('../utils/proposalAccess');
+const { loadUserPermissions } = require('../utils/rolePermissions');
 const { attachPokeStatus } = require('../utils/pokeStatus');
 const { enrichProposals, enrichProposalRow } = require('../utils/proposalTemplate');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const {
   PROPOSAL_STATUSES,
-  MOU_STATUSES,
+  MOU_LIFECYCLE_FILTERS,
   COOPERATION_MODES,
   COOPERATION_MODE_LABELS,
   getActiveSectorNames,
@@ -13,8 +14,14 @@ const {
   parsePagination,
   validateProposalListQuery,
   buildProposalListWhere,
+  buildListFiltersEcho,
 } = require('../utils/proposalListFilters');
+const { MOU_LIFECYCLE_LABELS } = require('../utils/mouLifecycle');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
+const {
+  loadPartyAProfileSnapshot,
+  loadPartyBProfileSnapshot,
+} = require('../utils/partyProfileSnapshots');
 
 const PROPOSAL_SELECT = `
   SELECT
@@ -28,11 +35,53 @@ const PROPOSAL_SELECT = `
   LEFT JOIN users rv ON rv.id = p.reviewed_by
 `;
 
-const REVIEW_STATUSES = ['submitted', 'resubmitted', 'approved', 'rejected', 'completed'];
-
 async function getProposalById(proposalId) {
   const [rows] = await pool.query(`${PROPOSAL_SELECT} WHERE p.id = ?`, [proposalId]);
   return rows[0] || null;
+}
+
+async function fetchPaginatedProposalList(req, res, options = {}) {
+  await ensureSectorCache();
+
+  const sectorScope = options.sectorScope || null;
+  const activeSectors = sectorScope ? [sectorScope] : getActiveSectorNames();
+
+  const validationErrors = validateProposalListQuery(req.query, activeSectors, {
+    ignoreSectorFilter: Boolean(sectorScope),
+  });
+  if (validationErrors.length) {
+    return res.status(400).json({ error: validationErrors[0] });
+  }
+
+  const { page, limit, offset } = parsePagination(req.query);
+  const { sql, params } = buildProposalListWhere(req.query, { sectorScope });
+
+  const countQuery = `SELECT COUNT(*) AS total ${PROPOSAL_LIST_FROM_SQL}${sql}`;
+  const [[countRow]] = await pool.query(countQuery, params);
+  const total = Number(countRow.total) || 0;
+  const totalPages = total ? Math.ceil(total / limit) : 0;
+
+  const orderBy = sectorScope
+    ? ' ORDER BY COALESCE(p.last_resubmitted_at, p.submitted_at, p.created_at) DESC, p.id DESC'
+    : ' ORDER BY p.created_at DESC, p.id DESC';
+
+  const dataQuery = `${PROPOSAL_SELECT}${sql}${orderBy} LIMIT ? OFFSET ?`;
+  const [rows] = await pool.query(dataQuery, [...params, limit, offset]);
+  const enriched = enrichProposals(rows);
+  const withPoke = await attachPokeStatus(enriched);
+
+  return res.json({
+    data: withPoke,
+    pagination: {
+      page,
+      limit,
+      total,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_prev: page > 1,
+    },
+    filters: buildListFiltersEcho(req.query, { sectorScope }),
+  });
 }
 
 async function getSectorLeadProposals(req, res) {
@@ -41,25 +90,7 @@ async function getSectorLeadProposals(req, res) {
       return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
     }
 
-    let query;
-    const params = [req.user.sector];
-
-    if (req.query.status) {
-      if (!REVIEW_STATUSES.includes(req.query.status)) {
-        return res.status(400).json({ error: 'Invalid status filter' });
-      }
-      query = `${PROPOSAL_SELECT} WHERE p.sector = ? AND p.status = ?`;
-      params.push(req.query.status);
-    } else {
-      query = `${PROPOSAL_SELECT} WHERE p.sector = ? AND p.status IN ('submitted', 'resubmitted')`;
-    }
-
-    query += ' ORDER BY COALESCE(p.last_resubmitted_at, p.submitted_at) DESC, p.created_at DESC';
-
-    const [rows] = await pool.query(query, params);
-    const enriched = enrichProposals(rows);
-    const withPoke = await attachPokeStatus(enriched);
-    return res.json(withPoke);
+    return fetchPaginatedProposalList(req, res, { sectorScope: req.user.sector });
   } catch (err) {
     console.error('Sector lead proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
@@ -68,44 +99,7 @@ async function getSectorLeadProposals(req, res) {
 
 async function getAllProposals(req, res) {
   try {
-    await ensureSectorCache();
-    const validationErrors = validateProposalListQuery(req.query, getActiveSectorNames());
-    if (validationErrors.length) {
-      return res.status(400).json({ error: validationErrors[0] });
-    }
-
-    const { page, limit, offset } = parsePagination(req.query);
-    const { sql, params } = buildProposalListWhere(req.query);
-
-    const countQuery = `SELECT COUNT(*) AS total ${PROPOSAL_LIST_FROM_SQL}${sql}`;
-    const [[countRow]] = await pool.query(countQuery, params);
-    const total = Number(countRow.total) || 0;
-    const totalPages = total ? Math.ceil(total / limit) : 0;
-
-    const dataQuery = `${PROPOSAL_SELECT}${sql} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?`;
-    const [rows] = await pool.query(dataQuery, [...params, limit, offset]);
-    const enriched = enrichProposals(rows);
-    const withPoke = await attachPokeStatus(enriched);
-
-    return res.json({
-      data: withPoke,
-      pagination: {
-        page,
-        limit,
-        total,
-        total_pages: totalPages,
-        has_next: page < totalPages,
-        has_prev: page > 1,
-      },
-      filters: {
-        conference_key: req.query.conference_key || null,
-        cooperation_mode: req.query.cooperation_mode || null,
-        status: req.query.status || null,
-        sector: req.query.sector || null,
-        mou_status: req.query.mou_status || null,
-        q: req.query.q || null,
-      },
-    });
+    return fetchPaginatedProposalList(req, res);
   } catch (err) {
     console.error('All proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
@@ -115,7 +109,22 @@ async function getAllProposals(req, res) {
 async function getProposalFilterOptions(req, res) {
   try {
     await ensureSectorCache();
-    const activeSectors = getActiveSectorNames();
+
+    const sectorScope =
+      req.user.role === 'sector_lead' ? String(req.user.sector || '').trim() : null;
+
+    if (req.user.role === 'sector_lead' && !sectorScope) {
+      return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
+    }
+
+    const conferenceParams = [];
+    let conferenceWhere =
+      'WHERE conference_key IS NOT NULL AND conference_name IS NOT NULL';
+    if (sectorScope) {
+      conferenceWhere += ' AND sector = ?';
+      conferenceParams.push(sectorScope);
+    }
+
     const [conferences] = await pool.query(
       `SELECT
          conference_key,
@@ -125,14 +134,20 @@ async function getProposalFilterOptions(req, res) {
          SUM(cooperation_mode = 'jv') AS jv_count,
          SUM(cooperation_mode = 'agreement') AS agreement_count
        FROM proposals
-       WHERE conference_key IS NOT NULL AND conference_name IS NOT NULL
+       ${conferenceWhere}
        GROUP BY conference_key, conference_name
-       ORDER BY conference_name ASC`
+       ORDER BY conference_name ASC`,
+      conferenceParams
     );
+
+    const sectors = sectorScope ? [sectorScope] : getActiveSectorNames();
 
     return res.json({
       proposal_statuses: PROPOSAL_STATUSES,
-      mou_statuses: MOU_STATUSES,
+      mou_lifecycle_statuses: MOU_LIFECYCLE_FILTERS.map((value) => ({
+        value,
+        label: MOU_LIFECYCLE_LABELS[value],
+      })),
       cooperation_modes: COOPERATION_MODES.map((value) => ({
         value,
         label: COOPERATION_MODE_LABELS[value],
@@ -145,7 +160,8 @@ async function getProposalFilterOptions(req, res) {
         jv_count: Number(row.jv_count),
         agreement_count: Number(row.agreement_count),
       })),
-      sectors: activeSectors,
+      sectors,
+      scoped_sector: sectorScope || null,
       pagination_defaults: {
         page: 1,
         limit: 20,
@@ -168,9 +184,16 @@ async function getProposalDetail(req, res) {
 
     const parsed = enrichProposalRow(proposal);
     const [withPoke] = await attachPokeStatus([parsed]);
+    const [partyAProfile, partyBProfile] = await Promise.all([
+      loadPartyAProfileSnapshot(req.user, proposal.party_a_id, proposal),
+      loadPartyBProfileSnapshot(req.user, proposal.party_b_user_id, proposal),
+    ]);
+    const userPermissions = await loadUserPermissions(req.user);
     return res.json({
       ...withPoke,
-      capabilities: buildProposalCapabilities(req, proposal, access),
+      capabilities: buildProposalCapabilities(req, proposal, access, userPermissions),
+      party_a_profile: partyAProfile,
+      party_b_profile: partyBProfile,
     });
   } catch (err) {
     console.error('Proposal detail error:', err.message);

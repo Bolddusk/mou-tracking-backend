@@ -1,10 +1,12 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { register, login, getMe, updateMe, changePassword } = require('../controllers/authController');
-const { verifyToken } = require('../middleware/auth');
+const { getMyPermissions, getRbacCatalog } = require('../controllers/rbacController');
+const { verifyToken, requireRole } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 
 const router = express.Router();
+const superAdmin = [verifyToken, requireRole('super_admin')];
 
 const registerValidation = [
   body('full_name').trim().notEmpty().withMessage('Full name is required'),
@@ -38,6 +40,8 @@ const updateProfileValidation = [
 router.post('/register', registerValidation, validate, register);
 router.post('/login', loginValidation, validate, login);
 router.get('/me', verifyToken, getMe);
+router.get('/permissions', verifyToken, getMyPermissions);
+router.get('/rbac/catalog', ...superAdmin, getRbacCatalog);
 router.patch('/me', verifyToken, updateProfileValidation, validate, updateMe);
 router.patch('/change-password', verifyToken, changePasswordValidation, validate, changePassword);
 

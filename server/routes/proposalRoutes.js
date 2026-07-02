@@ -1,5 +1,6 @@
 const express = require('express');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { requireAnyPermission } = require('../middleware/requirePermission');
 const { proposalUpload, handleUploadError } = require('../middleware/upload');
 const {
   saveDraft,
@@ -34,11 +35,28 @@ const proposalAuthorRoles = [verifyToken, requireRole('party_a', 'super_admin')]
 const partyMyProposals = [verifyToken, requireRole('party_a', 'party_b', 'investor')];
 const partyChatRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'regional_focal_point', 'focal_point'),
+  requireAnyPermission('proposals.messages.view'),
 ];
-const sectorLeadOnly = [verifyToken, requireRole('sector_lead')];
-const superAdminOnly = [verifyToken, requireRole('super_admin')];
-const reviewerRoles = [verifyToken, requireRole('sector_lead', 'super_admin')];
+const sectorLeadList = [
+  verifyToken,
+  requireAnyPermission('proposals.list_sector'),
+];
+const allProposalsList = [verifyToken, requireAnyPermission('nav.opportunities.all', 'proposals.list_all')];
+const reviewerListRoles = [
+  verifyToken,
+  requireAnyPermission('nav.opportunities.all', 'proposals.list_sector', 'proposals.filter_options'),
+];
+const approveProposalRoles = [verifyToken, requireAnyPermission('proposals.approve')];
+const rejectProposalRoles = [verifyToken, requireAnyPermission('proposals.reject')];
+const exportReportRoles = [verifyToken, requireAnyPermission('proposals.export')];
+const editContactsRoles = [verifyToken, requireAnyPermission('proposals.edit_contacts')];
+const proposalViewRoles = [
+  verifyToken,
+  requireAnyPermission('proposals.view', 'proposals.view_detail', 'proposals.view_own'),
+];
+const activitiesViewRoles = [verifyToken, requireAnyPermission('proposals.activities.view')];
+const activitiesCreateRoles = [verifyToken, requireAnyPermission('proposals.activities.create')];
+const messagesViewRoles = [verifyToken, requireAnyPermission('proposals.messages.view')];
 const activityRoles = [
   verifyToken,
   requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'regional_focal_point'),
@@ -63,29 +81,29 @@ router.post('/upload', ...proposalAuthorRoles, proposalUpload, handleUploadError
 router.get('/my', ...partyMyProposals, getMyProposals);
 router.delete('/:id', ...proposalAuthorRoles, deleteProposal);
 
-// Sector Lead
-router.get('/sector-lead', ...sectorLeadOnly, getSectorLeadProposals);
+// Sector Lead / permission-scoped list
+router.get('/sector-lead', ...sectorLeadList, getSectorLeadProposals);
 
-// Super Admin
-router.get('/filter-options', ...superAdminOnly, getProposalFilterOptions);
-router.get('/all', ...superAdminOnly, getAllProposals);
+// Sector Lead + Super Admin (filter dropdowns)
+router.get('/filter-options', ...reviewerListRoles, getProposalFilterOptions);
+router.get('/all', ...allProposalsList, getAllProposals);
 
 // Activities (before /:id)
-router.post('/:proposalId/activities', ...activityRoles, createActivity);
-router.get('/:proposalId/activities', ...activityRoles, getProposalActivities);
-router.get('/:proposalId/messages', ...partyChatRoles, getProposalChatMessages);
-router.post('/:proposalId/poke', ...reviewerRoles, pokeForUpdate);
+router.post('/:proposalId/activities', ...activitiesCreateRoles, createActivity);
+router.get('/:proposalId/activities', ...activitiesViewRoles, getProposalActivities);
+router.get('/:proposalId/messages', ...messagesViewRoles, getProposalChatMessages);
+router.post('/:proposalId/poke', ...approveProposalRoles, pokeForUpdate);
 
 // Proposal review
-router.patch('/:id/approve', ...reviewerRoles, approveProposal);
-router.patch('/:id/reject', ...reviewerRoles, rejectProposal);
-router.patch('/:id/party-contacts', ...reviewerRoles, updateProposalPartyContacts);
+router.patch('/:id/approve', ...approveProposalRoles, approveProposal);
+router.patch('/:id/reject', ...rejectProposalRoles, rejectProposal);
+router.patch('/:id/party-contacts', ...editContactsRoles, updateProposalPartyContacts);
 
-// Export report (sector lead / super admin) — before /:id
-router.get('/:id/export-report', ...reviewerRoles, exportProposalReport);
+// Export report — before /:id
+router.get('/:id/export-report', ...exportReportRoles, exportProposalReport);
 
 const mouUploadRoles = [verifyToken, requireRole('party_a', 'party_b', 'sector_lead', 'super_admin')];
-const dealCloseRoles = [verifyToken, requireRole('sector_lead', 'super_admin')];
+const dealCloseRoles = [verifyToken, requireAnyPermission('proposals.deal_close')];
 
 // Direct opportunity MOU (Party A fills all — legacy proposals table)
 router.patch('/:id/close-deal', ...dealCloseRoles, closeProposalDeal);
@@ -96,6 +114,6 @@ router.get('/:id/mou', ...mouViewRoles, getProposalMou);
 router.patch('/:id/mou', ...mouUploadRoles, proposalUpload, handleUploadError, saveProposalMou);
 
 // Detail — party_a (own), sector_lead, super_admin
-router.get('/:id', ...activityRoles, getProposalDetail);
+router.get('/:id', ...proposalViewRoles, getProposalDetail);
 
 module.exports = router;

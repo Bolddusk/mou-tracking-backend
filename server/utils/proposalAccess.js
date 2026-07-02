@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { isProposalLocked, canCloseProposalDeal } = require('./dealClose');
+const { permissionMatchesGrant } = require('./rolePermissions');
 
 async function getMatchForEngagement(proposalId) {
   const [rows] = await pool.query(
@@ -35,7 +36,7 @@ async function hasRfpApprovedMatchAccess(userId, proposalId) {
 
 async function sectorLeadCanAccessProposal(req, proposal) {
   if (proposal.status === 'draft') {
-    return false;
+    return { ok: false, reason: 'draft' };
   }
   if (proposal.sector === req.user.sector) {
     return { ok: true, viaMatchmaking: false };
@@ -89,7 +90,11 @@ async function checkProposalAccess(req, proposal) {
     }
     const slAccess = await sectorLeadCanAccessProposal(req, proposal);
     if (!slAccess.ok) {
-      return { error: 'Access denied', status: 403 };
+      const error =
+        slAccess.reason === 'draft'
+          ? 'Access denied — proposal not yet submitted'
+          : 'Access denied';
+      return { error, status: 403 };
     }
     return { ok: true, proposal, viaMatchmaking: slAccess.viaMatchmaking };
   }
@@ -210,7 +215,7 @@ function chatReady(proposal) {
   return false;
 }
 
-function buildProposalCapabilities(req, proposal, access) {
+function buildProposalCapabilities(req, proposal, access, userPermissions = null) {
   const caps = {
     can_view_chat: false,
     can_send_chat: false,
@@ -219,15 +224,32 @@ function buildProposalCapabilities(req, proposal, access) {
     can_view_mou: false,
     can_close_deal: false,
     can_edit_party_contacts: false,
+    can_approve: false,
+    can_reject: false,
   };
 
   if (!access.ok) return caps;
 
   const role = req.user.role;
+  const perms = userPermissions || req.userPermissions || [];
+  const reviewable = ['submitted', 'resubmitted'].includes(proposal.status);
   const ready = chatReady(proposal);
   const locked = isProposalLocked(proposal);
   const approvedAndOpen = proposal.status === 'approved' && !locked;
   const mouVisible = proposal.status === 'approved' || proposal.status === 'completed';
+
+  const canApproveReject =
+    reviewable &&
+    (role === 'super_admin' ||
+      (permissionMatchesGrant('proposals.approve', perms) &&
+        role === 'sector_lead' &&
+        proposal.status !== 'draft' &&
+        (proposal.sector === req.user.sector || access.viaMatchmaking)));
+
+  if (canApproveReject) {
+    caps.can_approve = role === 'super_admin' || permissionMatchesGrant('proposals.approve', perms);
+    caps.can_reject = role === 'super_admin' || permissionMatchesGrant('proposals.reject', perms);
+  }
 
   if (role === 'party_a' && proposal.party_a_id === req.user.id) {
     caps.can_view_chat = ready && !locked;
@@ -262,10 +284,11 @@ function buildProposalCapabilities(req, proposal, access) {
     caps.can_view_chat = ready && !locked;
     caps.can_send_chat = ready && !locked;
     caps.can_add_activity = approvedAndOpen;
-    caps.can_upload_mou = approvedAndOpen;
+    caps.can_upload_mou = approvedAndOpen && permissionMatchesGrant('proposals.mou.upload', perms);
     caps.can_view_mou = mouVisible;
-    caps.can_close_deal = canCloseProposalDeal(req, proposal);
-    caps.can_edit_party_contacts = true;
+    caps.can_close_deal =
+      canCloseProposalDeal(req, proposal) && permissionMatchesGrant('proposals.deal_close', perms);
+    caps.can_edit_party_contacts = permissionMatchesGrant('proposals.edit_contacts', perms);
     return caps;
   }
 
@@ -277,6 +300,10 @@ function buildProposalCapabilities(req, proposal, access) {
     caps.can_view_mou = mouVisible;
     caps.can_close_deal = canCloseProposalDeal(req, proposal);
     caps.can_edit_party_contacts = proposal.status !== 'draft';
+    if (reviewable) {
+      caps.can_approve = true;
+      caps.can_reject = true;
+    }
     return caps;
   }
 

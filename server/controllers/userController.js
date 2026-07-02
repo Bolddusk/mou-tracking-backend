@@ -8,6 +8,12 @@ const {
   isValidRole,
   roleRequiresSector,
 } = require('../utils/userHelpers');
+const { getPermissionsForRole } = require('../utils/rolePermissions');
+const {
+  getUserReferences,
+  unlinkDeletableUserReferences,
+  parseUnlinkReferencesFlag,
+} = require('../utils/userDeleteReferences');
 
 const USER_SELECT = `
   SELECT id, full_name, email, role, sector, organization, phone, created_at
@@ -17,55 +23,6 @@ const USER_SELECT = `
 async function getUserRowById(userId) {
   const [rows] = await pool.query(`${USER_SELECT} WHERE id = ?`, [userId]);
   return rows[0] || null;
-}
-
-async function getUserStats(userId) {
-  const [[proposalsFiled]] = await pool.query(
-    'SELECT COUNT(*) AS count FROM proposals WHERE party_a_id = ?',
-    [userId]
-  );
-  const [[proposalsReviewed]] = await pool.query(
-    'SELECT COUNT(*) AS count FROM proposals WHERE reviewed_by = ?',
-    [userId]
-  );
-  const [[complaintsFiled]] = await pool.query(
-    'SELECT COUNT(*) AS count FROM complaints WHERE filed_by = ?',
-    [userId]
-  );
-  const [[complaintsTagged]] = await pool.query(
-    'SELECT COUNT(*) AS count FROM complaints WHERE tagged_sector_lead = ?',
-    [userId]
-  );
-  const [[complaintsForwarded]] = await pool.query(
-    'SELECT COUNT(*) AS count FROM complaints WHERE forwarded_to = ?',
-    [userId]
-  );
-  const [[activitiesAdded]] = await pool.query(
-    'SELECT COUNT(*) AS count FROM proposal_activities WHERE added_by = ?',
-    [userId]
-  );
-
-  return {
-    proposals_filed: proposalsFiled.count,
-    proposals_reviewed: proposalsReviewed.count,
-    complaints_filed: complaintsFiled.count,
-    complaints_tagged: complaintsTagged.count,
-    complaints_forwarded: complaintsForwarded.count,
-    activities_added: activitiesAdded.count,
-  };
-}
-
-async function getUserReferences(userId) {
-  const stats = await getUserStats(userId);
-  const total =
-    stats.proposals_filed +
-    stats.proposals_reviewed +
-    stats.complaints_filed +
-    stats.complaints_tagged +
-    stats.complaints_forwarded +
-    stats.activities_added;
-
-  return { stats, total };
 }
 
 async function countSuperAdmins(excludeId = null) {
@@ -127,13 +84,20 @@ async function getRegionalFocalPoints(req, res) {
 }
 
 async function getRoles(req, res) {
-  return res.json(
-    VALID_ROLES.map((role) => ({
-      value: role,
-      label: ROLE_LABELS[role] || role,
-      requires_sector: roleRequiresSector(role),
-    }))
-  );
+  try {
+    const roles = await Promise.all(
+      VALID_ROLES.map(async (role) => ({
+        value: role,
+        label: ROLE_LABELS[role] || role,
+        requires_sector: roleRequiresSector(role),
+        permissions: await getPermissionsForRole(role),
+      }))
+    );
+    return res.json(roles);
+  } catch (err) {
+    console.error('Get roles error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch roles' });
+  }
 }
 
 async function listUsers(req, res) {
@@ -405,6 +369,7 @@ async function issuePartyBCredentials(req, res) {
 async function deleteUser(req, res) {
   try {
     const userId = Number(req.params.id);
+    const unlinkReferences = parseUnlinkReferencesFlag(req.query.unlink_references);
 
     if (userId === req.user.id) {
       return res.status(400).json({ error: 'Cannot delete your own account' });
@@ -445,21 +410,62 @@ async function deleteUser(req, res) {
       }
     }
 
-    const { stats, total } = await getUserReferences(userId);
-    if (total > 0) {
-      return res.status(400).json({
-        error: 'Cannot delete user with existing portal records',
-        references: stats,
-      });
+    const { stats, total, unlinkable, blocking } = await getUserReferences(userId);
+
+    if (!unlinkReferences) {
+      if (total > 0) {
+        const payload = {
+          error: 'Cannot delete user with existing portal records',
+          references: stats,
+        };
+        if (unlinkable > 0 && blocking === 0) {
+          payload.hint =
+            'Retry with ?unlink_references=true to unlink Party B portal access from proposals and delete the account (proposals are kept)';
+        }
+        return res.status(400).json(payload);
+      }
+
+      await pool.query('DELETE FROM users WHERE id = ?', [userId]);
+      return res.json({ message: 'User deleted successfully', id: userId });
     }
 
-    await pool.query('DELETE FROM users WHERE id = ?', [userId]);
-    return res.json({ message: 'User deleted successfully', id: userId });
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const unlinked = await unlinkDeletableUserReferences(userId, connection);
+      const afterUnlink = await getUserReferences(userId, connection);
+
+      if (afterUnlink.blocking > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: 'Cannot delete user — remaining references cannot be unlinked automatically',
+          references: afterUnlink.stats,
+          unlinked,
+          hint:
+            'Party A proposals, matchmaking submissions, complaints, and activity history must be reassigned or retained',
+        });
+      }
+
+      await connection.query('DELETE FROM users WHERE id = ?', [userId]);
+      await connection.commit();
+
+      return res.json({
+        message: 'User deleted successfully — proposal records were kept, portal links removed',
+        id: userId,
+        unlinked,
+      });
+    } catch (txErr) {
+      await connection.rollback();
+      throw txErr;
+    } finally {
+      connection.release();
+    }
   } catch (err) {
     console.error('Delete user error:', err.message);
     if (err.code === 'ER_ROW_IS_REFERENCED_2') {
       return res.status(400).json({
         error: 'Cannot delete user — still referenced by other records',
+        hint: 'Try ?unlink_references=true for Party B accounts linked to proposals',
       });
     }
     return res.status(500).json({ error: 'Failed to delete user' });

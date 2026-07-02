@@ -1,5 +1,6 @@
 const express = require('express');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { requireAnyPermission } = require('../middleware/requirePermission');
 const { proposalUpload, handleUploadError } = require('../middleware/upload');
 const {
   saveDraft,
@@ -31,34 +32,33 @@ const { closeMatchDeal } = require('../controllers/dealCloseController');
 
 const router = express.Router();
 
-const submitterRoles = [verifyToken, requireRole('party_a', 'investor')];
-const focalPointRoles = [verifyToken, requireRole('focal_point', 'regional_focal_point')];
+const submitterRoles = [
+  verifyToken,
+  requireAnyPermission('matchmaking.create', 'matchmaking.submit', 'matchmaking.upload'),
+];
+const focalPointRoles = [
+  verifyToken,
+  requireAnyPermission('matchmaking.list_review_queue', 'matchmaking.review'),
+];
 const reviewerRoles = [
   verifyToken,
-  requireRole('focal_point', 'regional_focal_point', 'sector_lead'),
+  requireAnyPermission('matchmaking.review'),
 ];
 const matcherRoles = [
   verifyToken,
-  requireRole('sector_lead', 'focal_point', 'regional_focal_point', 'super_admin'),
+  requireAnyPermission('matchmaking.list_board', 'matchmaking.match'),
 ];
 const matcherViewRoles = [
   verifyToken,
-  requireRole('sector_lead', 'focal_point', 'regional_focal_point'),
+  requireAnyPermission('matchmaking.view_matches', 'matchmaking.view_match_detail'),
 ];
 const forwardedRoles = [
   verifyToken,
-  requireRole('sector_lead', 'focal_point', 'regional_focal_point'),
+  requireAnyPermission('matchmaking.list_forwarded', 'matchmaking.review'),
 ];
 const proposalDetailRoles = [
   verifyToken,
-  requireRole(
-    'party_a',
-    'investor',
-    'focal_point',
-    'regional_focal_point',
-    'sector_lead',
-    'super_admin'
-  ),
+  requireAnyPermission('matchmaking.view', 'proposals.view'),
 ];
 const matchViewerRoles = [
   verifyToken,
@@ -83,7 +83,7 @@ const engagementLookupRoles = [
 router.post('/proposals/draft', ...submitterRoles, saveDraft);
 router.post('/proposals/submit', ...submitterRoles, submitProposal);
 router.post('/proposals/upload', ...submitterRoles, proposalUpload, handleUploadError, uploadFile);
-router.get('/proposals/my', ...submitterRoles, getMyProposals);
+router.get('/proposals/my', verifyToken, requireAnyPermission('matchmaking.list_my'), getMyProposals);
 router.get('/proposals/focal-point', ...focalPointRoles, getFocalPointQueue);
 router.patch('/proposals/:id/shortlist', ...reviewerRoles, shortlistProposal);
 router.patch('/proposals/:id/reject', ...reviewerRoles, rejectProposal);

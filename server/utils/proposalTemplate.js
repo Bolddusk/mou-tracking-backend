@@ -1,3 +1,8 @@
+const {
+  MOU_LIFECYCLE_LABELS,
+  resolveMouLifecycle,
+} = require('./mouLifecycle');
+
 const FINANCIAL_METRICS = [
   { key: 'total_revenue', label: 'Total Revenue', category: 'Income Statement', unit: 'PKR Mn' },
   { key: 'ebitda', label: 'EBITDA', category: 'Income Statement', unit: 'PKR Mn' },
@@ -210,6 +215,11 @@ function enrichProposalRow(row) {
     row.proposal_title ||
     'Untitled Proposal';
 
+  const mou_lifecycle = resolveMouLifecycle({
+    ...row,
+    executive_summary,
+  });
+
   return {
     ...row,
     conference_info,
@@ -222,6 +232,8 @@ function enrichProposalRow(row) {
     contact_info,
     display_title,
     proposal_title: display_title,
+    mou_lifecycle,
+    mou_lifecycle_label: MOU_LIFECYCLE_LABELS[mou_lifecycle] || mou_lifecycle,
   };
 }
 

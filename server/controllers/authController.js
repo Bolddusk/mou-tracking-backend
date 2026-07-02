@@ -1,12 +1,15 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
+const { ROLE_LABELS } = require('../utils/userHelpers');
+const { buildRbacPayload } = require('../utils/rolePermissions');
 
-const REDIRECT_BY_ROLE = {
+const FALLBACK_REDIRECT_BY_ROLE = {
   party_a: '/dashboard/party-a',
   party_b: '/dashboard/party-b',
   sector_lead: '/dashboard/sector-lead',
   super_admin: '/dashboard/super-admin',
+  admin: '/dashboard/admin',
   regional_focal_point: '/dashboard/regional-focal',
   focal_point: '/dashboard/focal-point',
   investor: '/dashboard/investor',
@@ -36,6 +39,7 @@ function publicUser(user) {
     full_name: user.full_name,
     email: user.email,
     role: user.role,
+    role_label: ROLE_LABELS[user.role] || user.role,
     sector: user.sector || null,
     country: user.country || null,
     organization: user.organization,
@@ -45,11 +49,21 @@ function publicUser(user) {
   };
 }
 
-function resolveRedirect(user) {
+function resolveRedirect(user, rbac) {
   if (user.must_change_password) {
     return '/auth/change-password';
   }
-  return REDIRECT_BY_ROLE[user.role] || null;
+  return rbac?.redirect || FALLBACK_REDIRECT_BY_ROLE[user.role] || null;
+}
+
+async function authResponse(user) {
+  const rbac = await buildRbacPayload(user);
+  return {
+    token: signToken(user),
+    user: publicUser(user),
+    redirect: resolveRedirect(user, rbac),
+    rbac,
+  };
 }
 
 async function register(req, res) {
@@ -76,16 +90,13 @@ async function register(req, res) {
       email,
       role,
       sector: null,
+      country: null,
       organization,
       phone,
       must_change_password: 0,
     };
 
-    return res.status(201).json({
-      token: signToken(user),
-      user: publicUser(user),
-      redirect: resolveRedirect(user),
-    });
+    return res.status(201).json(await authResponse(user));
   } catch (err) {
     console.error('Register error:', err.message);
     return res.status(500).json({ error: 'Registration failed' });
@@ -109,11 +120,7 @@ async function login(req, res) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    return res.json({
-      token: signToken(user),
-      user: publicUser(user),
-      redirect: resolveRedirect(user),
-    });
+    return res.json(await authResponse(user));
   } catch (err) {
     console.error('Login error:', err.message);
     return res.status(500).json({ error: 'Login failed' });
@@ -131,9 +138,11 @@ async function getMe(req, res) {
     }
 
     const user = rows[0];
+    const rbac = await buildRbacPayload(user);
     return res.json({
       user: publicUser(user),
-      redirect: resolveRedirect(user),
+      redirect: resolveRedirect(user, rbac),
+      rbac,
     });
   } catch (err) {
     console.error('Get me error:', err.message);
@@ -203,11 +212,13 @@ async function updateMe(req, res) {
       req.user.id,
     ]);
     const updated = updatedRows[0];
+    const rbac = await buildRbacPayload(updated);
 
     const response = {
       message: 'Profile updated successfully',
       user: publicUser(updated),
-      redirect: resolveRedirect(updated),
+      redirect: resolveRedirect(updated, rbac),
+      rbac,
     };
 
     if (emailChanged) {
@@ -260,12 +271,14 @@ async function changePassword(req, res) {
     );
 
     const updated = { ...user, must_change_password: 0 };
+    const rbac = await buildRbacPayload(updated);
 
     return res.json({
       message: 'Password changed successfully',
       token: signToken(updated),
       user: publicUser(updated),
-      redirect: REDIRECT_BY_ROLE[updated.role] || null,
+      redirect: resolveRedirect(updated, rbac),
+      rbac,
     });
   } catch (err) {
     console.error('Change password error:', err.message);

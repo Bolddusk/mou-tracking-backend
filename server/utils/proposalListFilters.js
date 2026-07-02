@@ -3,9 +3,13 @@ const {
   COOPERATION_MODE_LABELS,
 } = require('../constants/cooperationModes');
 const { getActiveSectorNames } = require('./sectorRegistry');
+const {
+  MOU_LIFECYCLE_FILTERS,
+  buildMouLifecycleWhere,
+  isValidMouLifecycleFilter,
+} = require('./mouLifecycle');
 
 const PROPOSAL_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'resubmitted', 'completed'];
-const MOU_STATUSES = ['not_started', 'in_progress', 'uploaded', 'signed', 'deal_closed'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -15,23 +19,6 @@ const PROPOSAL_LIST_FROM_SQL = `
   JOIN users pa ON pa.id = p.party_a_id
   LEFT JOIN users rv ON rv.id = p.reviewed_by
 `;
-
-const RESOLVED_MOU_STATUS_SQL = `COALESCE(
-  NULLIF(p.mou_status, 'not_started'),
-  CASE
-    WHEN p.mou_file_url IS NOT NULL AND p.mou_file_url != '' THEN 'uploaded'
-    WHEN p.mou_scope IS NOT NULL AND p.mou_scope != '' THEN 'in_progress'
-    ELSE 'not_started'
-  END
-)`;
-
-function parseBoolParam(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const normalized = String(value).toLowerCase();
-  if (normalized === 'true' || normalized === '1') return true;
-  if (normalized === 'false' || normalized === '0') return false;
-  return null;
-}
 
 function isValidDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value));
@@ -47,17 +34,17 @@ function parsePagination(query) {
   return { page, limit, offset };
 }
 
-function validateProposalListQuery(query, activeSectors = getActiveSectorNames()) {
+function validateProposalListQuery(query, activeSectors = getActiveSectorNames(), options = {}) {
   const errors = [];
 
   if (query.status && !PROPOSAL_STATUSES.includes(query.status)) {
     errors.push('Invalid status filter');
   }
-  if (query.sector && !activeSectors.includes(query.sector)) {
+  if (!options.ignoreSectorFilter && query.sector && !activeSectors.includes(query.sector)) {
     errors.push('Invalid sector filter');
   }
-  if (query.mou_status && !MOU_STATUSES.includes(query.mou_status)) {
-    errors.push('Invalid mou_status filter');
+  if (query.mou_lifecycle && !isValidMouLifecycleFilter(query.mou_lifecycle)) {
+    errors.push('Invalid mou_lifecycle filter — use active, inactive, or execution');
   }
   if (query.cooperation_mode && !COOPERATION_MODES.includes(query.cooperation_mode)) {
     errors.push('Invalid cooperation_mode filter');
@@ -72,32 +59,36 @@ function validateProposalListQuery(query, activeSectors = getActiveSectorNames()
     errors.push('Invalid date_to — use YYYY-MM-DD');
   }
 
-  for (const key of ['has_mou', 'has_pitch', 'deal_closed']) {
-    if (query[key] !== undefined && query[key] !== '' && parseBoolParam(query[key]) === null) {
-      errors.push(`Invalid ${key} filter — use true or false`);
-    }
-  }
-
   return errors;
 }
 
-function buildProposalListWhere(query) {
+function buildProposalListWhere(query, options = {}) {
   const conditions = [];
   const params = [];
+
+  if (options.sectorScope) {
+    conditions.push('p.sector = ?');
+    params.push(options.sectorScope);
+    // Party A drafts are private until submitted — sector lead cannot open detail.
+    conditions.push("p.status != 'draft'");
+  }
 
   if (query.status) {
     conditions.push('p.status = ?');
     params.push(query.status);
   }
 
-  if (query.sector) {
+  if (!options.sectorScope && query.sector) {
     conditions.push('p.sector = ?');
     params.push(query.sector);
   }
 
-  if (query.mou_status) {
-    conditions.push(`${RESOLVED_MOU_STATUS_SQL} = ?`);
-    params.push(query.mou_status);
+  if (query.mou_lifecycle) {
+    const lifecycleWhere = buildMouLifecycleWhere(query.mou_lifecycle);
+    if (lifecycleWhere) {
+      conditions.push(lifecycleWhere.sql);
+      params.push(...lifecycleWhere.params);
+    }
   }
 
   if (query.cooperation_mode) {
@@ -138,27 +129,6 @@ function buildProposalListWhere(query) {
     params.push(query.date_to);
   }
 
-  const hasMou = parseBoolParam(query.has_mou);
-  if (hasMou === true) {
-    conditions.push("(p.mou_file_url IS NOT NULL AND p.mou_file_url != '')");
-  } else if (hasMou === false) {
-    conditions.push("(p.mou_file_url IS NULL OR p.mou_file_url = '')");
-  }
-
-  const hasPitch = parseBoolParam(query.has_pitch);
-  if (hasPitch === true) {
-    conditions.push("(p.proposal_file_url IS NOT NULL AND p.proposal_file_url != '')");
-  } else if (hasPitch === false) {
-    conditions.push("(p.proposal_file_url IS NULL OR p.proposal_file_url = '')");
-  }
-
-  const dealClosed = parseBoolParam(query.deal_closed);
-  if (dealClosed === true) {
-    conditions.push("(p.mou_status = 'deal_closed' OR p.status = 'completed')");
-  } else if (dealClosed === false) {
-    conditions.push("(COALESCE(p.mou_status, 'not_started') != 'deal_closed' AND p.status != 'completed')");
-  }
-
   if (!conditions.length) {
     return { sql: '', params };
   }
@@ -169,9 +139,22 @@ function buildProposalListWhere(query) {
   };
 }
 
+function buildListFiltersEcho(query, options = {}) {
+  return {
+    conference_key: query.conference_key || null,
+    cooperation_mode: query.cooperation_mode || null,
+    status: query.status || null,
+    sector: options.sectorScope || query.sector || null,
+    mou_lifecycle: query.mou_lifecycle || null,
+    q: query.q || null,
+    date_from: query.date_from || null,
+    date_to: query.date_to || null,
+  };
+}
+
 module.exports = {
   PROPOSAL_STATUSES,
-  MOU_STATUSES,
+  MOU_LIFECYCLE_FILTERS,
   COOPERATION_MODES,
   COOPERATION_MODE_LABELS,
   getActiveSectorNames,
@@ -182,4 +165,5 @@ module.exports = {
   parsePagination,
   validateProposalListQuery,
   buildProposalListWhere,
+  buildListFiltersEcho,
 };
