@@ -16,7 +16,16 @@ const ISLAMABAD_AGRI_2026 = {
   host: 'Government of Pakistan',
 };
 
-const KNOWN_CONFERENCES = [HANGZHOU_AGRI_2026, ISLAMABAD_AGRI_2026];
+const PAK_CHINA_SEP_25_CONFERENCE = {
+  key: 'pak-china-sep-25-conference',
+  name: 'Pak China Sep-25 Conference',
+  date: '2025-09-01',
+  end_date: '2025-09-30',
+  location: 'China',
+  host: 'Government of Pakistan',
+};
+
+const KNOWN_CONFERENCES = [HANGZHOU_AGRI_2026, ISLAMABAD_AGRI_2026, PAK_CHINA_SEP_25_CONFERENCE];
 
 function getConferenceByKey(key) {
   return KNOWN_CONFERENCES.find((item) => item.key === key) || null;
@@ -38,6 +47,7 @@ function buildConferenceInfo(conference, overrides = {}) {
 module.exports = {
   HANGZHOU_AGRI_2026,
   ISLAMABAD_AGRI_2026,
+  PAK_CHINA_SEP_25_CONFERENCE,
   KNOWN_CONFERENCES,
   getConferenceByKey,
   buildConferenceInfo,

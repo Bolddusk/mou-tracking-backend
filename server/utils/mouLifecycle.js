@@ -12,28 +12,46 @@ const EXECUTION_SQL = `(
   OR p.status = 'completed'
   OR p.cooperation_mode = 'agreement'
   OR p.deal_closed_at IS NOT NULL
+  OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.executive_summary, '$.mou_operational_status')), '')) LIKE '%execution%'
 )`;
 
 /** SQL: collaboration marked dropped / inactive in imported or edited data. */
 const INACTIVE_SQL = `(
   LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.executive_summary, '$.collaboration_dropped')), '')) IN ('true', '1')
+  OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.executive_summary, '$.mou_operational_status')), '')) = 'inactive'
   OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.executive_summary, '$.current_status')), '')) LIKE '%dropped%'
   OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.executive_summary, '$.current_status')), '')) LIKE '%inactive%'
   OR LOWER(COALESCE(p.proposal_description, '')) LIKE '%collaboration status: dropped%'
+  OR LOWER(COALESCE(p.proposal_description, '')) LIKE '%collaboration status: inactive%'
 )`;
 
 function isCollaborationDropped(executiveSummary, proposalDescription = '') {
   if (!executiveSummary || typeof executiveSummary !== 'object') {
-    return /collaboration status:\s*dropped/i.test(proposalDescription || '');
+    return (
+      /collaboration status:\s*dropped/i.test(proposalDescription || '') ||
+      /collaboration status:\s*inactive/i.test(proposalDescription || '')
+    );
   }
   if (executiveSummary.collaboration_dropped === true || executiveSummary.collaboration_dropped === 1) {
+    return true;
+  }
+  const operationalStatus = String(executiveSummary.mou_operational_status || '').toLowerCase();
+  if (operationalStatus === 'inactive') {
     return true;
   }
   const status = String(executiveSummary.current_status || '').toLowerCase();
   if (status.includes('dropped') || status.includes('inactive')) {
     return true;
   }
-  return /collaboration status:\s*dropped/i.test(proposalDescription || '');
+  return (
+    /collaboration status:\s*dropped/i.test(proposalDescription || '') ||
+    /collaboration status:\s*inactive/i.test(proposalDescription || '')
+  );
+}
+
+function isImportedExecutionStatus(executiveSummary) {
+  const status = String(executiveSummary?.mou_operational_status || '').toLowerCase();
+  return status.includes('execution');
 }
 
 function isExecutionPhase(proposal) {
@@ -53,6 +71,8 @@ function resolveMouLifecycle(proposal) {
     typeof proposal.executive_summary === 'object'
       ? proposal.executive_summary
       : null;
+
+  if (isImportedExecutionStatus(executiveSummary)) return 'execution';
 
   if (isCollaborationDropped(executiveSummary, proposal.proposal_description)) {
     return 'inactive';
