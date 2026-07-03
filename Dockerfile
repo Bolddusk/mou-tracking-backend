@@ -1,16 +1,24 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
-# Working directory
 WORKDIR /app
 
-# Install dependencies first (better layer caching)
-COPY package.json package-lock.json ./
-RUN npm ci
+# Chromium + fonts for Puppeteer PDF reports (conference SIFC export)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    chromium \
+    ca-certificates \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+  && rm -rf /var/lib/apt/lists/*
 
-# Copy application source
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 COPY . .
 
-# Persisted upload storage
 RUN mkdir -p server/uploads
 
 ENV NODE_ENV=production

@@ -85,13 +85,20 @@ Button dikhao jab `supports_report === true`.
 
 ## PDF note (first-time setup)
 
-Agar PDF par `500` aaye aur server log mein `Could not find Chrome` ho:
+**Docker / Linux server:** image rebuild required — `Dockerfile` installs system Chromium (`PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`).
 
 ```bash
-npm run puppeteer:install-chrome
+docker build -t mou-tracking-backend .
+docker run ...
 ```
 
-Phir dev server restart karo.
+**Bare metal (no Docker):**
+```bash
+npm run puppeteer:install-chrome
+# or: apt install chromium && export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+```
+
+Agar PDF `503` aaye → use `format=xlsx` (Excel works without Chromium).
 
 ---
 

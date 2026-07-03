@@ -277,22 +277,33 @@ function chromeCandidatePaths() {
   }
   return [
     ...fromEnv,
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
     '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
   ];
+}
+
+function isExecutableFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return fs.statSync(filePath).isFile();
+  }
 }
 
 async function resolveChromeExecutable() {
   for (const candidate of chromeCandidatePaths()) {
-    if (candidate && fs.existsSync(candidate)) {
+    if (isExecutableFile(candidate)) {
       return candidate;
     }
   }
 
   try {
     const bundled = await puppeteer.executablePath();
-    if (bundled && fs.existsSync(bundled)) {
+    if (isExecutableFile(bundled)) {
       return bundled;
     }
   } catch {
@@ -305,9 +316,11 @@ async function resolveChromeExecutable() {
 async function launchPdfBrowser() {
   const executablePath = await resolveChromeExecutable();
   if (!executablePath) {
-    throw new Error(
-      'Chrome not found for PDF export. Run: npm run puppeteer:install-chrome'
-    );
+    const hint =
+      process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH
+        ? 'Configured Chrome path is missing or not executable'
+        : 'Install Chromium (Docker: rebuild image) or run: npm run puppeteer:install-chrome';
+    throw new Error(`Chrome not found for PDF export. ${hint}`);
   }
 
   return puppeteer.launch({
@@ -319,6 +332,7 @@ async function launchPdfBrowser() {
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--font-render-hinting=none',
+      '--disable-software-rasterizer',
     ],
   });
 }

@@ -67,7 +67,21 @@ async function getConferenceReport(req, res) {
     }
 
     if (format === 'pdf') {
-      const body = await conferenceReportToPdf(report);
+      let body;
+      try {
+        body = await conferenceReportToPdf(report);
+      } catch (pdfErr) {
+        const msg = String(pdfErr.message || '');
+        if (/chrome not found|failed to launch the browser/i.test(msg)) {
+          console.error('Conference PDF error:', pdfErr.message);
+          return res.status(503).json({
+            error: 'PDF export unavailable — Chromium not installed on server',
+            hint: 'Rebuild Docker image (includes Chromium) or set PUPPETEER_EXECUTABLE_PATH',
+            fallback: 'Use format=xlsx or JSON preview with browser Print',
+          });
+        }
+        throw pdfErr;
+      }
       const disposition = req.query.download === '1' ? 'attachment' : 'inline';
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `${disposition}; filename="${basename}.pdf"`);
