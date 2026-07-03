@@ -20,6 +20,7 @@ async function loadPartyAProfileSnapshot(viewer, partyAUserId, proposal = null) 
     const data = await buildPartyAProfileResponse(access.user.id, {
       user: access.user,
       read_only: access.read_only,
+      can_edit: access.can_edit,
     });
     return { linked: true, data };
   } catch {
@@ -49,6 +50,7 @@ async function loadPartyBProfileSnapshot(viewer, partyBUserId, proposal = null) 
     const data = await buildPartyBProfileResponse(access.user.id, {
       user: access.user,
       read_only: access.read_only,
+      can_edit: access.can_edit,
     });
     return { linked: true, data };
   } catch {

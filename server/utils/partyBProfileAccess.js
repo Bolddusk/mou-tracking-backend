@@ -4,6 +4,10 @@ const {
   sectorLeadHasAnySector,
   getSectorLeadScopedSectors,
 } = require('./sectorLeadAssignments');
+const {
+  isStaffProfileEditor,
+  partyBHasFocalPointLink,
+} = require('./partyProfileStaffAccess');
 
 const PARTY_B_ROLES = new Set(['party_b', 'investor']);
 
@@ -43,6 +47,11 @@ async function partyBHasProposalInAnySector(partyBUserId, sectors) {
   return false;
 }
 
+function canEditPartyBProfile(viewer, targetId) {
+  if (PARTY_B_ROLES.has(viewer.role) && viewer.id === targetId) return true;
+  return isStaffProfileEditor(viewer.role);
+}
+
 async function assertCanViewPartyBProfile(viewer, targetUserId) {
   const targetId = Number(targetUserId);
   if (!targetId) {
@@ -53,7 +62,13 @@ async function assertCanViewPartyBProfile(viewer, targetUserId) {
     if (viewer.id !== targetId) {
       return { error: 'You can only view your own profile', status: 403 };
     }
-  } else if (viewer.role !== 'super_admin' && viewer.role !== 'sector_lead') {
+  } else if (
+    viewer.role !== 'super_admin' &&
+    viewer.role !== 'admin' &&
+    viewer.role !== 'sector_lead' &&
+    viewer.role !== 'focal_point' &&
+    viewer.role !== 'regional_focal_point'
+  ) {
     return { error: 'Forbidden', status: 403 };
   }
 
@@ -76,11 +91,30 @@ async function assertCanViewPartyBProfile(viewer, targetUserId) {
     }
   }
 
+  if (['focal_point', 'regional_focal_point'].includes(viewer.role)) {
+    const linked = await partyBHasFocalPointLink(viewer.id, targetId);
+    if (!linked) {
+      return { error: 'This Party B is not linked to your matchmaking engagements', status: 403 };
+    }
+  }
+
+  const editable = canEditPartyBProfile(viewer, targetId);
+
   return {
     ok: true,
     user,
-    read_only: viewer.id !== targetId,
+    read_only: !editable,
+    can_edit: editable,
   };
+}
+
+async function assertCanEditPartyBProfile(viewer, targetUserId) {
+  const access = await assertCanViewPartyBProfile(viewer, targetUserId);
+  if (!access.ok) return access;
+  if (!access.can_edit) {
+    return { error: 'You do not have permission to edit this profile', status: 403 };
+  }
+  return access;
 }
 
 async function assertCanViewPartyBProfileOnProposal(viewer, targetUserId, proposal) {
@@ -99,8 +133,8 @@ async function assertCanViewPartyBProfileOnProposal(viewer, targetUserId, propos
     return { error: 'Party B profile not found', status: 404 };
   }
 
-  if (viewer.role === 'super_admin') {
-    return { ok: true, user, read_only: viewer.id !== targetId };
+  if (viewer.role === 'super_admin' || viewer.role === 'admin') {
+    return { ok: true, user, read_only: false, can_edit: true };
   }
 
   if (viewer.role === 'sector_lead') {
@@ -110,15 +144,24 @@ async function assertCanViewPartyBProfileOnProposal(viewer, targetUserId, propos
     if (!sectorLeadCoversSector(viewer, proposal.sector)) {
       return { error: 'Access denied — wrong sector', status: 403 };
     }
-    return { ok: true, user, read_only: true };
+    return { ok: true, user, read_only: false, can_edit: true };
   }
 
   if (PARTY_B_ROLES.has(viewer.role) && viewer.id === targetId) {
-    return { ok: true, user, read_only: false };
+    return { ok: true, user, read_only: false, can_edit: true };
+  }
+
+  if (['focal_point', 'regional_focal_point'].includes(viewer.role)) {
+    const { isMatchEngagementStakeholder } = require('./proposalAccess');
+    const allowed = await isMatchEngagementStakeholder(viewer.id, proposal.id);
+    if (!allowed) {
+      return { error: 'Access denied', status: 403 };
+    }
+    return { ok: true, user, read_only: false, can_edit: true };
   }
 
   if (viewer.role === 'party_a' && Number(proposal.party_a_id) === viewer.id) {
-    return { ok: true, user, read_only: true };
+    return { ok: true, user, read_only: true, can_edit: false };
   }
 
   return { error: 'Forbidden', status: 403 };
@@ -129,5 +172,6 @@ module.exports = {
   getPartyBUser,
   partyBHasProposalInSector,
   assertCanViewPartyBProfile,
+  assertCanEditPartyBProfile,
   assertCanViewPartyBProfileOnProposal,
 };

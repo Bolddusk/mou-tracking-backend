@@ -14,7 +14,7 @@ const {
 } = require('../utils/partyAProfile');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
 const { getSectorLeadScopedSectors } = require('../utils/sectorLeadAssignments');
-const { assertCanViewPartyAProfile, getPartyAUser } = require('../utils/partyAProfileAccess');
+const { assertCanViewPartyAProfile, assertCanEditPartyAProfile, getPartyAUser } = require('../utils/partyAProfileAccess');
 
 function formatUserSummary(user) {
   return {
@@ -67,6 +67,11 @@ async function buildProfileResponse(userId, options = {}) {
   if (options.read_only !== undefined) {
     payload.read_only = options.read_only;
   }
+  if (options.can_edit !== undefined) {
+    payload.can_edit = options.can_edit;
+  } else if (options.read_only !== undefined) {
+    payload.can_edit = !options.read_only;
+  }
 
   return payload;
 }
@@ -94,6 +99,7 @@ async function getProfile(req, res) {
     const payload = await buildProfileResponse(req.user.id, {
       user,
       read_only: false,
+      can_edit: true,
     });
     return res.json(payload);
   } catch (err) {
@@ -120,6 +126,7 @@ async function getProfileByUserId(req, res) {
     const payload = await buildProfileResponse(access.user.id, {
       user: access.user,
       read_only: access.read_only,
+      can_edit: access.can_edit,
     });
 
     return res.json(payload);
@@ -194,43 +201,54 @@ async function getSectors(req, res) {
   }
 }
 
+async function applyProfileUpdate(targetUserId, body) {
+  await ensureSectorCache();
+  const allowedSectors = getActiveSectorNames();
+  const updates = pickProfileUpdates(body);
+  if (body.sectors !== undefined) {
+    const parsed = parseSectors(body.sectors, allowedSectors);
+    if (parsed.error) {
+      return { error: parsed.error, status: 400 };
+    }
+    updates.sectors = JSON.stringify(parsed.sectors);
+  }
+
+  if (!Object.keys(updates).length) {
+    return { error: 'No profile fields provided to update', status: 400 };
+  }
+
+  await ensureProfileRow(targetUserId);
+
+  const setClause = Object.keys(updates)
+    .map((key) => `${key} = ?`)
+    .join(', ');
+  const params = [...Object.values(updates), targetUserId];
+  await pool.query(`UPDATE party_a_profiles SET ${setClause} WHERE user_id = ?`, params);
+
+  const payload = await buildProfileResponse(targetUserId);
+  await syncUserBasics(targetUserId, payload.profile);
+
+  await pool.query('UPDATE party_a_profiles SET profile_complete = ? WHERE user_id = ?', [
+    payload.completion.profile_complete ? 1 : 0,
+    targetUserId,
+  ]);
+  payload.profile.profile_complete = payload.completion.profile_complete;
+
+  return { payload };
+}
+
 async function updateProfile(req, res) {
   try {
-    await ensureSectorCache();
-    const allowedSectors = getActiveSectorNames();
-    const updates = pickProfileUpdates(req.body);
-    if (req.body.sectors !== undefined) {
-      const parsed = parseSectors(req.body.sectors, allowedSectors);
-      if (parsed.error) {
-        return res.status(400).json({ error: parsed.error });
-      }
-      updates.sectors = JSON.stringify(parsed.sectors);
+    const result = await applyProfileUpdate(req.user.id, req.body);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
     }
-
-    if (!Object.keys(updates).length) {
-      return res.status(400).json({ error: 'No profile fields provided to update' });
-    }
-
-    await ensureProfileRow(req.user.id);
-
-    const setClause = Object.keys(updates)
-      .map((key) => `${key} = ?`)
-      .join(', ');
-    const params = [...Object.values(updates), req.user.id];
-    await pool.query(`UPDATE party_a_profiles SET ${setClause} WHERE user_id = ?`, params);
-
-    const payload = await buildProfileResponse(req.user.id);
-    await syncUserBasics(req.user.id, payload.profile);
-
-    await pool.query('UPDATE party_a_profiles SET profile_complete = ? WHERE user_id = ?', [
-      payload.completion.profile_complete ? 1 : 0,
-      req.user.id,
-    ]);
-    payload.profile.profile_complete = payload.completion.profile_complete;
 
     return res.json({
       message: 'Profile updated',
-      ...payload,
+      ...result.payload,
+      read_only: false,
+      can_edit: true,
     });
   } catch (err) {
     console.error('Update profile error:', err.message);
@@ -238,67 +256,104 @@ async function updateProfile(req, res) {
   }
 }
 
+async function updateProfileByUserId(req, res) {
+  try {
+    const access = await assertCanEditPartyAProfile(req.user, req.params.userId);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const result = await applyProfileUpdate(access.user.id, req.body);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    const user = await getPartyAUser(access.user.id);
+    return res.json({
+      message: 'Profile updated',
+      ...result.payload,
+      user: formatUserSummary(user),
+      read_only: false,
+      can_edit: true,
+    });
+  } catch (err) {
+    console.error('Update Party A profile by user id error:', err.message);
+    return res.status(500).json({ error: 'Failed to update profile' });
+  }
+}
+
+async function uploadDocumentForUser(targetUserId, req) {
+  if (!req.file) {
+    return { error: 'No file uploaded. Use field name: document', status: 400 };
+  }
+
+  const docType = String(req.body.doc_type || '').trim();
+  if (!ALLOWED_DOC_TYPES.has(docType)) {
+    return {
+      error: 'doc_type must be fbr_certificate, secp_certificate, or other',
+      status: 400,
+    };
+  }
+
+  const title = req.body.title?.trim() || null;
+  const description = req.body.description?.trim() || null;
+
+  if (docType === 'other' && !title) {
+    return { error: 'title is required for other documents', status: 400 };
+  }
+
+  await ensureProfileRow(targetUserId);
+
+  const fileUrl = getPublicFileUrl(req, req.file.filename, 'profiles');
+
+  if (MANDATORY_DOC_TYPES.has(docType)) {
+    const [existing] = await pool.query(
+      'SELECT id FROM party_a_profile_documents WHERE user_id = ? AND doc_type = ?',
+      [targetUserId, docType]
+    );
+    if (existing.length) {
+      await pool.query('DELETE FROM party_a_profile_documents WHERE id = ?', [existing[0].id]);
+    }
+  }
+
+  const [result] = await pool.query(
+    `INSERT INTO party_a_profile_documents
+      (user_id, doc_type, title, description, file_url, original_filename)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      targetUserId,
+      docType,
+      docType === 'other' ? title : docType === 'fbr_certificate' ? 'FBR Taxpayer Registration Certificate' : 'SECP Certificate of Incorporation',
+      description,
+      fileUrl,
+      req.file.originalname,
+    ]
+  );
+
+  const payload = await buildProfileResponse(targetUserId);
+  await pool.query('UPDATE party_a_profiles SET profile_complete = ? WHERE user_id = ?', [
+    payload.completion.profile_complete ? 1 : 0,
+    targetUserId,
+  ]);
+  payload.profile.profile_complete = payload.completion.profile_complete;
+
+  const uploaded = payload.documents.find((d) => d.id === result.insertId);
+  return { payload, uploaded };
+}
+
 async function uploadDocument(req, res) {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded. Use field name: document' });
+    const result = await uploadDocumentForUser(req.user.id, req);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
     }
-
-    const docType = String(req.body.doc_type || '').trim();
-    if (!ALLOWED_DOC_TYPES.has(docType)) {
-      return res.status(400).json({
-        error: 'doc_type must be fbr_certificate, secp_certificate, or other',
-      });
-    }
-
-    const title = req.body.title?.trim() || null;
-    const description = req.body.description?.trim() || null;
-
-    if (docType === 'other' && !title) {
-      return res.status(400).json({ error: 'title is required for other documents' });
-    }
-
-    await ensureProfileRow(req.user.id);
-
-    const fileUrl = getPublicFileUrl(req, req.file.filename, 'profiles');
-
-    if (MANDATORY_DOC_TYPES.has(docType)) {
-      const [existing] = await pool.query(
-        'SELECT id FROM party_a_profile_documents WHERE user_id = ? AND doc_type = ?',
-        [req.user.id, docType]
-      );
-      if (existing.length) {
-        await pool.query('DELETE FROM party_a_profile_documents WHERE id = ?', [existing[0].id]);
-      }
-    }
-
-    const [result] = await pool.query(
-      `INSERT INTO party_a_profile_documents
-        (user_id, doc_type, title, description, file_url, original_filename)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        req.user.id,
-        docType,
-        docType === 'other' ? title : docType === 'fbr_certificate' ? 'FBR Taxpayer Registration Certificate' : 'SECP Certificate of Incorporation',
-        description,
-        fileUrl,
-        req.file.originalname,
-      ]
-    );
-
-    const payload = await buildProfileResponse(req.user.id);
-    await pool.query('UPDATE party_a_profiles SET profile_complete = ? WHERE user_id = ?', [
-      payload.completion.profile_complete ? 1 : 0,
-      req.user.id,
-    ]);
-    payload.profile.profile_complete = payload.completion.profile_complete;
-
-    const uploaded = payload.documents.find((d) => d.id === result.insertId);
 
     return res.status(201).json({
       message: 'Document uploaded',
-      document: uploaded,
-      ...payload,
+      document: result.uploaded,
+      ...result.payload,
+      read_only: false,
+      can_edit: true,
     });
   } catch (err) {
     console.error('Profile document upload error:', err.message);
@@ -306,42 +361,106 @@ async function uploadDocument(req, res) {
   }
 }
 
+async function uploadDocumentByUserId(req, res) {
+  try {
+    const access = await assertCanEditPartyAProfile(req.user, req.params.userId);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const result = await uploadDocumentForUser(access.user.id, req);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    const user = await getPartyAUser(access.user.id);
+    return res.status(201).json({
+      message: 'Document uploaded',
+      document: result.uploaded,
+      ...result.payload,
+      user: formatUserSummary(user),
+      read_only: false,
+      can_edit: true,
+    });
+  } catch (err) {
+    console.error('Party A profile document upload by user id error:', err.message);
+    return res.status(500).json({ error: 'Failed to upload document' });
+  }
+}
+
+async function deleteDocumentForUser(targetUserId, docId) {
+  if (!docId) {
+    return { error: 'Invalid document id', status: 400 };
+  }
+
+  const [rows] = await pool.query(
+    'SELECT id, doc_type FROM party_a_profile_documents WHERE id = ? AND user_id = ?',
+    [docId, targetUserId]
+  );
+  if (!rows.length) {
+    return { error: 'Document not found', status: 404 };
+  }
+
+  if (rows[0].doc_type !== 'other') {
+    return {
+      error: 'Mandatory certificates cannot be deleted. Upload a new file to replace them.',
+      status: 400,
+    };
+  }
+
+  await pool.query('DELETE FROM party_a_profile_documents WHERE id = ?', [docId]);
+
+  const payload = await buildProfileResponse(targetUserId);
+  await pool.query('UPDATE party_a_profiles SET profile_complete = ? WHERE user_id = ?', [
+    payload.completion.profile_complete ? 1 : 0,
+    targetUserId,
+  ]);
+  payload.profile.profile_complete = payload.completion.profile_complete;
+
+  return { payload };
+}
+
 async function deleteDocument(req, res) {
   try {
-    const docId = Number(req.params.id);
-    if (!docId) {
-      return res.status(400).json({ error: 'Invalid document id' });
+    const result = await deleteDocumentForUser(req.user.id, Number(req.params.id));
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
     }
-
-    const [rows] = await pool.query(
-      'SELECT id, doc_type FROM party_a_profile_documents WHERE id = ? AND user_id = ?',
-      [docId, req.user.id]
-    );
-    if (!rows.length) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    if (rows[0].doc_type !== 'other') {
-      return res.status(400).json({
-        error: 'Mandatory certificates cannot be deleted. Upload a new file to replace them.',
-      });
-    }
-
-    await pool.query('DELETE FROM party_a_profile_documents WHERE id = ?', [docId]);
-
-    const payload = await buildProfileResponse(req.user.id);
-    await pool.query('UPDATE party_a_profiles SET profile_complete = ? WHERE user_id = ?', [
-      payload.completion.profile_complete ? 1 : 0,
-      req.user.id,
-    ]);
-    payload.profile.profile_complete = payload.completion.profile_complete;
 
     return res.json({
       message: 'Document deleted',
-      ...payload,
+      ...result.payload,
+      read_only: false,
+      can_edit: true,
     });
   } catch (err) {
     console.error('Delete profile document error:', err.message);
+    return res.status(500).json({ error: 'Failed to delete document' });
+  }
+}
+
+async function deleteDocumentByUserId(req, res) {
+  try {
+    const access = await assertCanEditPartyAProfile(req.user, req.params.userId);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const result = await deleteDocumentForUser(access.user.id, Number(req.params.docId));
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    const user = await getPartyAUser(access.user.id);
+    return res.json({
+      message: 'Document deleted',
+      ...result.payload,
+      user: formatUserSummary(user),
+      read_only: false,
+      can_edit: true,
+    });
+  } catch (err) {
+    console.error('Delete Party A profile document by user id error:', err.message);
     return res.status(500).json({ error: 'Failed to delete document' });
   }
 }
@@ -352,8 +471,11 @@ module.exports = {
   listPartyAProfiles,
   getSectors,
   updateProfile,
+  updateProfileByUserId,
   uploadDocument,
+  uploadDocumentByUserId,
   deleteDocument,
+  deleteDocumentByUserId,
   buildProfileResponse,
   ensureProfileRow,
 };

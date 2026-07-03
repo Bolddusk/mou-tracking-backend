@@ -7,15 +7,21 @@ const {
   listPartyAProfiles,
   getSectors,
   updateProfile,
+  updateProfileByUserId,
   uploadDocument,
+  uploadDocumentByUserId,
   deleteDocument,
+  deleteDocumentByUserId,
 } = require('../controllers/partyAProfileController');
 const {
   getProfileByUserId: getPartyBProfileByUserId,
   getPartyBProfileEntry,
   updateProfile: updatePartyBProfile,
+  updateProfileByUserId: updatePartyBProfileByUserId,
   uploadDocument: uploadPartyBDocument,
+  uploadDocumentByUserId: uploadPartyBDocumentByUserId,
   deleteDocument: deletePartyBDocument,
+  deleteDocumentByUserId: deletePartyBDocumentByUserId,
 } = require('../controllers/partyBProfileController');
 const {
   getMyMeta,
@@ -28,18 +34,44 @@ const router = express.Router();
 
 const partyAOnly = [verifyToken, requireRole('party_a')];
 const partyBOnly = [verifyToken, requireRole('party_b', 'investor')];
-const profileViewers = [verifyToken, requireRole('party_a', 'sector_lead', 'super_admin')];
+const profileViewers = [
+  verifyToken,
+  requireRole('party_a', 'sector_lead', 'super_admin', 'admin', 'focal_point', 'regional_focal_point'),
+];
 const partyBProfileViewers = [
   verifyToken,
-  requireRole('party_b', 'investor', 'sector_lead', 'super_admin'),
+  requireRole(
+    'party_b',
+    'investor',
+    'sector_lead',
+    'super_admin',
+    'admin',
+    'focal_point',
+    'regional_focal_point'
+  ),
 ];
-const profileListRoles = [verifyToken, requireRole('sector_lead', 'super_admin')];
+const profileStaffEditors = [
+  verifyToken,
+  requireRole('sector_lead', 'super_admin', 'admin', 'focal_point', 'regional_focal_point'),
+];
+const profileListRoles = [verifyToken, requireRole('sector_lead', 'super_admin', 'admin')];
 
 router.get('/sectors', verifyToken, getSectors);
 router.get('/party-a', ...profileListRoles, listPartyAProfiles);
+router.patch('/party-a/:userId', ...profileStaffEditors, updateProfileByUserId);
+router.post(
+  '/party-a/:userId/documents',
+  ...profileStaffEditors,
+  profileDocumentUpload,
+  handleUploadError,
+  uploadDocumentByUserId
+);
+router.delete('/party-a/:userId/documents/:docId', ...profileStaffEditors, deleteDocumentByUserId);
+
 router.get('/party-b', ...partyBProfileViewers, getPartyBProfileEntry);
 router.get('/party-b/:userId', ...partyBProfileViewers, getPartyBProfileByUserId);
 router.patch('/party-b', ...partyBOnly, updatePartyBProfile);
+router.patch('/party-b/:userId', ...profileStaffEditors, updatePartyBProfileByUserId);
 router.post(
   '/party-b/documents',
   ...partyBOnly,
@@ -47,7 +79,19 @@ router.post(
   handleUploadError,
   uploadPartyBDocument
 );
+router.post(
+  '/party-b/:userId/documents',
+  ...profileStaffEditors,
+  profileDocumentUpload,
+  handleUploadError,
+  uploadPartyBDocumentByUserId
+);
 router.delete('/party-b/documents/:id', ...partyBOnly, deletePartyBDocument);
+router.delete(
+  '/party-b/:userId/documents/:docId',
+  ...profileStaffEditors,
+  deletePartyBDocumentByUserId
+);
 
 router.get('/compliance-filings/meta', ...partyAOnly, getMyMeta);
 router.get('/compliance-filings/matrix', ...partyAOnly, getMyMatrix);
