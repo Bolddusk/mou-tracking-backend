@@ -34,6 +34,9 @@ const HANGZHOU_AGRI_2026 = {
 const KNOWN_CONFERENCES = [HANGZHOU_AGRI_2026, ISLAMABAD_AGRI_2026, PAK_CHINA_SEP_25_CONFERENCE];
 
 function getConferenceByKey(key) {
+  const { getConferenceFromCacheByKey } = require('../utils/conferenceRegistry');
+  const cached = getConferenceFromCacheByKey(key);
+  if (cached) return cached;
   return KNOWN_CONFERENCES.find((item) => item.key === key) || null;
 }
 
@@ -51,11 +54,12 @@ function getReportableConference(key) {
 function buildConferenceInfo(conference, overrides = {}) {
   return {
     conference_name: conference.name,
-    conference_date: conference.date,
-    conference_end_date: conference.end_date,
-    conference_location: overrides.location || conference.location,
-    conference_host: conference.host,
+    conference_date: conference.date || conference.conference_date || '',
+    conference_end_date: conference.end_date || conference.conference_end_date || '',
+    conference_location: overrides.location || conference.location || '',
+    conference_host: conference.host || '',
     conference_description:
+      conference.description ||
       overrides.description ||
       `Historic signed records imported for ${conference.name}.`,
   };

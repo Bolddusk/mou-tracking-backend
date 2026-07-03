@@ -13,10 +13,14 @@ const userRoutes = require('./routes/userRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const sectorRoutes = require('./routes/sectorRoutes');
+const conferenceRoutes = require('./routes/conferenceRoutes');
+const sifcCategoryRoutes = require('./routes/sifcCategoryRoutes');
 const devRoutes = require('./routes/devRoutes');
 const { testConnection, getDbConfig } = require('./config/db');
 const { initProposalChat } = require('./socket/proposalChat');
 const { refreshSectorCache } = require('./utils/sectorRegistry');
+const { refreshConferenceCache } = require('./utils/conferenceRegistry');
+const { refreshSifcCategoryCache } = require('./utils/sifcCategoryRegistry');
 
 const app = express();
 const server = http.createServer(app);
@@ -51,6 +55,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/sectors', sectorRoutes);
+app.use('/api/conferences', conferenceRoutes);
+app.use('/api/sifc-categories', sifcCategoryRoutes);
 app.use('/api/dev', devRoutes);
 
 app.use((req, res) => {
@@ -69,6 +75,8 @@ server.listen(PORT, async () => {
     const { host, port } = getDbConfig();
     console.log(`MySQL connected: ${database} @ ${host}:${port}`);
     await refreshSectorCache();
+    await refreshConferenceCache();
+    await refreshSifcCategoryCache();
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     console.error('Run: npm run db:init');

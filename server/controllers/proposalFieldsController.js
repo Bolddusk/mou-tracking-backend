@@ -8,6 +8,8 @@ const { enrichProposalRow } = require('../utils/proposalTemplate');
 const { attachPokeStatus } = require('../utils/pokeStatus');
 const { loadUserPermissions } = require('../utils/rolePermissions');
 const { ensureSectorCache, getActiveSectorNames } = require('../utils/sectorRegistry');
+const { ensureConferenceCache, listActiveConferences } = require('../utils/conferenceRegistry');
+const { ensureSifcCategoryCache, listActiveSifcCategories } = require('../utils/sifcCategoryRegistry');
 const {
   buildProposalFieldUpdates,
   getEditableFieldCatalog,
@@ -27,6 +29,8 @@ async function getProposalRow(proposalId) {
 async function getProposalEditableFields(req, res) {
   try {
     await ensureSectorCache();
+    await ensureConferenceCache();
+    await ensureSifcCategoryCache();
     const proposal = await getProposalRow(req.params.id);
     const access = await checkProposalAccess(req, proposal);
     if (!access.ok) {
@@ -35,6 +39,10 @@ async function getProposalEditableFields(req, res) {
 
     const edit = canEditProposalFields(req, proposal, access);
     const catalog = getEditableFieldCatalog();
+    const [conferences, sifcCategories] = await Promise.all([
+      listActiveConferences(),
+      listActiveSifcCategories(),
+    ]);
 
     return res.json({
       proposal_id: Number(req.params.id),
@@ -43,6 +51,8 @@ async function getProposalEditableFields(req, res) {
       reason: edit.ok ? null : edit.error,
       catalog,
       sectors: edit.ok ? getActiveSectorNames() : [],
+      conferences: edit.ok ? conferences : [],
+      sifc_categories: edit.ok ? sifcCategories : [],
     });
   } catch (err) {
     console.error('Get proposal editable fields error:', err.message);
@@ -53,6 +63,8 @@ async function getProposalEditableFields(req, res) {
 async function updateProposalFields(req, res) {
   try {
     await ensureSectorCache();
+    await ensureConferenceCache();
+    await ensureSifcCategoryCache();
     const proposal = await getProposalRow(req.params.id);
     const access = await checkProposalAccess(req, proposal);
     if (!access.ok) {

@@ -32,6 +32,8 @@
     "db:migrate:cooperation-mode": "node server/scripts/migrateCooperationMode.js",
     "db:migrate:conference-fields": "node server/scripts/migrateConferenceFields.js",
     "db:migrate:sectors": "node server/scripts/migrateSectors.js",
+    "db:migrate:conferences-sifc": "node server/scripts/migrateConferencesAndSifc.js",
+    "db:migrate:conference-engagement": "node server/scripts/migrateConferenceEngagementDescription.js",
     "db:migrate:sector-lead-assignments": "node server/scripts/migrateSectorLeadAssignments.js",
     "db:import:agri-signed-mous": "node server/scripts/importAgriSignedMous.js",
     "db:import:islamabad-agri-tech-mous": "node server/scripts/importIslamabadAgriTechMous.js",

@@ -26,6 +26,20 @@ const {
   adminDeleteSector,
 } = require('../controllers/sectorController');
 const {
+  adminListConferences,
+  adminGetConference,
+  adminCreateConference,
+  adminUpdateConference,
+  adminDeleteConference,
+} = require('../controllers/conferenceController');
+const {
+  adminListSifcCategories,
+  adminGetSifcCategory,
+  adminCreateSifcCategory,
+  adminUpdateSifcCategory,
+  adminDeleteSifcCategory,
+} = require('../controllers/sifcCategoryController');
+const {
   listPermissionCatalog,
   listRolesWithPermissions,
   getRolePermissions,
@@ -77,5 +91,17 @@ router.get('/sectors/:id', ...adminRoles, adminGetSector);
 router.post('/sectors', ...adminRoles, adminCreateSector);
 router.patch('/sectors/:id', ...adminRoles, adminUpdateSector);
 router.delete('/sectors/:id', ...adminRoles, adminDeleteSector);
+
+router.get('/conferences', ...adminRoles, adminListConferences);
+router.get('/conferences/:id', ...adminRoles, adminGetConference);
+router.post('/conferences', ...adminRoles, adminCreateConference);
+router.patch('/conferences/:id', ...adminRoles, adminUpdateConference);
+router.delete('/conferences/:id', ...adminRoles, adminDeleteConference);
+
+router.get('/sifc-categories', ...adminRoles, adminListSifcCategories);
+router.get('/sifc-categories/:id', ...adminRoles, adminGetSifcCategory);
+router.post('/sifc-categories', ...adminRoles, adminCreateSifcCategory);
+router.patch('/sifc-categories/:id', ...adminRoles, adminUpdateSifcCategory);
+router.delete('/sifc-categories/:id', ...adminRoles, adminDeleteSifcCategory);
 
 module.exports = router;

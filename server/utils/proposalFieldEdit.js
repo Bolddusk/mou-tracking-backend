@@ -2,6 +2,12 @@ const { normalizeCooperationMode, COOPERATION_MODES } = require('../constants/co
 const { getActiveSectorNames } = require('./sectorRegistry');
 const { sectorLeadCoversSector } = require('./sectorLeadAssignments');
 const {
+  isValidActiveConferenceKey,
+  getConferenceFromCacheByKey,
+} = require('./conferenceRegistry');
+const { isValidActiveSifcCategory } = require('./sifcCategoryRegistry');
+const { buildConferenceInfo } = require('../constants/conferences');
+const {
   JSON_FIELDS,
   SCALAR_DRAFT_FIELDS,
   PROJECT_TYPES,
@@ -20,7 +26,6 @@ const EXTRA_SCALAR_FIELDS = [
   'proposal_description',
   'cooperation_mode',
   'conference_key',
-  'conference_name',
   'investment_value_usd',
   'mou_sub_sector',
   'jurisdiction',
@@ -28,6 +33,12 @@ const EXTRA_SCALAR_FIELDS = [
   'mou_status',
   'sector_lead_comment',
 ];
+
+/** Not editable via MOU full-field edit — use company_name / party-contacts instead. */
+const EXCLUDED_PARTY_A_INFO_KEYS = ['organization_name'];
+
+/** conference_name is synced from conference_key lookup — not a free-text field. */
+const READ_ONLY_LOOKUP_SCALAR_FIELDS = new Set(['conference_name']);
 
 const EXECUTIVE_SUMMARY_KEYS = [
   'company_overview',
@@ -82,14 +93,71 @@ function mergeJsonPatch(existingValue, patch, fallback = {}) {
   return { ...base, ...patch };
 }
 
+function stripExcludedPartyAInfo(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
+  const next = { ...patch };
+  EXCLUDED_PARTY_A_INFO_KEYS.forEach((key) => {
+    delete next[key];
+  });
+  return next;
+}
+
+function applyConferenceKeyUpdate(updates, conferenceKey) {
+  const key = String(conferenceKey || '').trim();
+  if (!key) {
+    return { error: 'conference_key cannot be empty', status: 400 };
+  }
+  if (!isValidActiveConferenceKey(key)) {
+    return { error: 'Invalid conference_key — choose from active conferences list', status: 400 };
+  }
+
+  const conference = getConferenceFromCacheByKey(key);
+  if (!conference) {
+    return { error: 'Invalid conference_key — choose from active conferences list', status: 400 };
+  }
+
+  updates.conference_key = key;
+  updates.conference_name = conference.name;
+  updates.conference_info = buildConferenceInfo(conference);
+  if (conference.engagement_type) {
+    updates.engagement_type = conference.engagement_type;
+  }
+  return { updates };
+}
+
 function buildProposalFieldUpdates(body, existingRow, user) {
+  const sanitizedBody = { ...body };
+  if (sanitizedBody.party_a_info !== undefined) {
+    sanitizedBody.party_a_info = stripExcludedPartyAInfo(sanitizedBody.party_a_info);
+    if (
+      sanitizedBody.party_a_info &&
+      typeof sanitizedBody.party_a_info === 'object' &&
+      !Array.isArray(sanitizedBody.party_a_info) &&
+      !Object.keys(sanitizedBody.party_a_info).length
+    ) {
+      delete sanitizedBody.party_a_info;
+    }
+  }
+
+  if (sanitizedBody.conference_name !== undefined && sanitizedBody.conference_key === undefined) {
+    return {
+      error: 'conference_name is read-only — send conference_key from the conferences dropdown',
+      status: 400,
+    };
+  }
+
   const enriched = enrichProposalRow(existingRow);
-  const updates = { ...buildDraftUpdates(body) };
+  const updates = { ...buildDraftUpdates(sanitizedBody) };
 
   for (const field of EXTRA_SCALAR_FIELDS) {
-    if (body[field] !== undefined) {
-      updates[field] = body[field];
+    if (sanitizedBody[field] !== undefined) {
+      updates[field] = sanitizedBody[field];
     }
+  }
+
+  if (sanitizedBody.conference_key !== undefined) {
+    const conferenceResult = applyConferenceKeyUpdate(updates, sanitizedBody.conference_key);
+    if (conferenceResult.error) return conferenceResult;
   }
 
   if (body.cooperation_mode !== undefined) {
@@ -138,12 +206,23 @@ function buildProposalFieldUpdates(body, existingRow, user) {
   }
 
   for (const field of JSON_FIELDS) {
-    if (body[field] !== undefined) {
+    if (sanitizedBody[field] !== undefined) {
+      let patch = sanitizedBody[field];
+      if (field === 'executive_summary' && patch && typeof patch === 'object' && patch.sifc_category !== undefined) {
+        const category = String(patch.sifc_category || '').trim();
+        if (category && !isValidActiveSifcCategory(category)) {
+          return {
+            error: 'Invalid sifc_category — choose from active SIFC categories list',
+            status: 400,
+          };
+        }
+      }
+
       const fallback =
         field === 'executive_summary'
           ? enriched.executive_summary
           : enriched[field] || {};
-      updates[field] = mergeJsonPatch(enriched[field], body[field], fallback);
+      updates[field] = mergeJsonPatch(enriched[field], patch, fallback);
     }
   }
 
@@ -160,9 +239,25 @@ function getEditableFieldCatalog() {
       ...SCALAR_DRAFT_FIELDS,
       ...EXTRA_SCALAR_FIELDS,
       'external_reference',
-    ].filter((f) => !READ_ONLY_SYSTEM_FIELDS.has(f)),
+    ].filter((f) => !READ_ONLY_SYSTEM_FIELDS.has(f) && !READ_ONLY_LOOKUP_SCALAR_FIELDS.has(f)),
     json_fields: JSON_FIELDS,
     executive_summary_keys: EXECUTIVE_SUMMARY_KEYS,
+    excluded_party_a_info_keys: [...EXCLUDED_PARTY_A_INFO_KEYS],
+    lookup_fields: {
+      conference_key: {
+        source: 'conferences',
+        value_field: 'key',
+        label_field: 'name',
+        sync_scalar_fields: ['conference_name'],
+        sync_json_fields: ['conference_info'],
+      },
+      'executive_summary.sifc_category': {
+        source: 'sifc_categories',
+        value_field: 'name',
+        label_field: 'name',
+      },
+    },
+    read_only_lookup_scalar_fields: [...READ_ONLY_LOOKUP_SCALAR_FIELDS],
     enums: {
       engagement_type: ENGAGEMENT_TYPES,
       party_b_entity_type: ENTITY_TYPES,
@@ -181,4 +276,5 @@ module.exports = {
   getEditableFieldCatalog,
   EXECUTIVE_SUMMARY_KEYS,
   READ_ONLY_SYSTEM_FIELDS,
+  EXCLUDED_PARTY_A_INFO_KEYS,
 };
