@@ -360,5 +360,6 @@ module.exports = {
   hasRfpApprovedMatchAccess,
   isMatchEngagementStakeholder,
   getMatchForEngagement,
+  sectorLeadCanAccessProposal,
   buildProposalCapabilities,
 };
