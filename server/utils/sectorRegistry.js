@@ -97,6 +97,8 @@ async function cascadeRenameSector(oldName, newName) {
   await pool.query('UPDATE proposals SET sector = ? WHERE sector = ?', [newName, oldName]);
   await pool.query('UPDATE users SET sector = ? WHERE sector = ?', [newName, oldName]);
   await pool.query('UPDATE mm_proposals SET sector = ? WHERE sector = ?', [newName, oldName]);
+  const { cascadeRenameSector: cascadeAssignments } = require('./sectorLeadAssignments');
+  await cascadeAssignments(oldName, newName);
 }
 
 async function createSector(name, sortOrder = 0) {

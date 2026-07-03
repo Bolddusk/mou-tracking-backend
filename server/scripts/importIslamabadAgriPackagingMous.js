@@ -13,7 +13,8 @@ const {
 } = require('../utils/islamabadAgriPackagingMouImport');
 
 const PARTY_A_EMAIL = process.env.IMPORT_PARTY_A_EMAIL || 'superadmin@test.com';
-const SECTOR_LEAD_EMAIL = process.env.IMPORT_SECTOR_LEAD_EMAIL || 'sectorlead@test.com';
+const { DEFAULT_SECTOR_LEAD_EMAIL } = require('../constants/seedDefaults');
+const SECTOR_LEAD_EMAIL = process.env.IMPORT_SECTOR_LEAD_EMAIL || DEFAULT_SECTOR_LEAD_EMAIL;
 
 async function requireUser(email, label) {
   const [rows] = await pool.query('SELECT id, email, role FROM users WHERE email = ?', [email]);

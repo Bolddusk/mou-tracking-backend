@@ -351,10 +351,25 @@ function resolveRedirectFromNavigation(user, navigation) {
 
 function buildRbacContext(user, permissions = []) {
   const listScope = require('./permissionBundles').resolveProposalsListScope(user, permissions);
+  const scoped_sectors =
+    user.role === 'sector_lead'
+      ? user.assigned_sectors?.length
+        ? user.assigned_sectors
+        : user.sector
+          ? [user.sector]
+          : []
+      : [];
+
   return {
     sector: user.sector || null,
     country: user.country || null,
-    scoped_sector: user.role === 'sector_lead' ? user.sector || null : null,
+    scoped_sector:
+      user.role === 'sector_lead'
+        ? scoped_sectors.length === 1
+          ? scoped_sectors[0]
+          : user.primary_sector || user.sector || null
+        : null,
+    scoped_sectors: scoped_sectors.length ? scoped_sectors : null,
     scoped_country: user.role === 'regional_focal_point' ? user.country || null : null,
     list_scope: listScope.list_scope,
     proposals_list_api: listScope.proposals_list_api,
@@ -385,21 +400,23 @@ async function hasAnyPermission(user, permissions, permissionsList) {
 }
 
 async function buildRbacPayload(user) {
-  const rawPermissions = await loadUserPermissions(user);
+  const { attachSectorLeadSectors } = require('./sectorLeadAssignments');
+  const enriched = await attachSectorLeadSectors(user);
+  const rawPermissions = await loadUserPermissions(enriched);
   const permissions = normalizeClientPermissions(rawPermissions);
-  const navigation = buildNavigationFromPermissions(user, rawPermissions);
-  const listScope = require('./permissionBundles').resolveProposalsListScope(user, rawPermissions);
+  const navigation = buildNavigationFromPermissions(enriched, rawPermissions);
+  const listScope = require('./permissionBundles').resolveProposalsListScope(enriched, rawPermissions);
 
   return {
-    role: user.role,
-    role_label: ROLE_LABELS[user.role] || user.role,
+    role: enriched.role,
+    role_label: ROLE_LABELS[enriched.role] || enriched.role,
     permissions,
     navigation,
-    context: buildRbacContext(user, rawPermissions),
+    context: buildRbacContext(enriched, rawPermissions),
     capabilities: {
       proposals_list_api: listScope.proposals_list_api,
     },
-    redirect: resolveRedirectFromNavigation(user, navigation),
+    redirect: resolveRedirectFromNavigation(enriched, navigation),
     source: 'database',
     sidebar_nav_count: navigation.reduce((n, s) => n + s.items.length, 0),
     sidebar_nav_max: SIDEBAR_NAV_KEYS.length,

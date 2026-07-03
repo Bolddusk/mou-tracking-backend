@@ -13,6 +13,7 @@ const {
   hasValue,
 } = require('../utils/partyBProfile');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
+const { getSectorLeadScopedSectors } = require('../utils/sectorLeadAssignments');
 const {
   PARTY_B_ROLES,
   assertCanViewPartyBProfile,
@@ -166,11 +167,12 @@ async function listPartyBProfiles(req, res) {
     }
 
     if (req.user.role === 'sector_lead') {
-      if (!req.user.sector) {
+      const sectorScopes = getSectorLeadScopedSectors(req.user);
+      if (!sectorScopes.length) {
         return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
       }
 
-      const sector = req.user.sector;
+      const sectorPlaceholders = sectorScopes.map(() => '?').join(', ');
       const [rows] = await pool.query(
         `SELECT DISTINCT u.id, u.full_name, u.email, u.organization, u.phone, u.country,
                 p.company_name, p.profile_complete, p.updated_at AS profile_updated_at
@@ -180,17 +182,22 @@ async function listPartyBProfiles(req, res) {
            AND (
              u.id IN (
                SELECT party_b_user_id FROM proposals
-               WHERE sector = ? AND status != 'draft' AND party_b_user_id IS NOT NULL
+               WHERE sector IN (${sectorPlaceholders}) AND status != 'draft' AND party_b_user_id IS NOT NULL
              )
              OR u.id IN (
                SELECT submitted_by FROM mm_proposals
-               WHERE sector = ? AND side = 'side_b' AND status != 'draft'
+               WHERE sector IN (${sectorPlaceholders}) AND side = 'side_b' AND status != 'draft'
              )
            )
          ORDER BY u.full_name ASC`,
-        [sector, sector]
+        [...sectorScopes, ...sectorScopes]
       );
-      return res.json({ profiles: rows, scope: 'sector', sector });
+      return res.json({
+        profiles: rows,
+        scope: 'sectors',
+        sectors: sectorScopes,
+        sector: sectorScopes.length === 1 ? sectorScopes[0] : null,
+      });
     }
 
     return res.status(403).json({ error: 'Forbidden' });

@@ -6,6 +6,9 @@ const {
   reassignSectorLead,
   getReassignments,
   getOrphans,
+  listSectorLeadsAdmin,
+  getSectorLeadSectorsAdmin,
+  putSectorLeadSectorsAdmin,
 } = require('../controllers/adminSectorLeadController');
 const {
   getMeta,
@@ -43,6 +46,10 @@ const complianceAdmin = [verifyToken, requireAnyPermission('nav.compliance.audit
 router.patch('/sector-lead/reassign', ...slReassign, reassignSectorLead);
 router.get('/sector-lead/reassignments', ...slReassign, getReassignments);
 router.get('/sector-lead/orphans', ...slReassign, getOrphans);
+
+router.get('/sector-leads', ...adminRoles, listSectorLeadsAdmin);
+router.get('/sector-leads/:userId/sectors', ...adminRoles, getSectorLeadSectorsAdmin);
+router.put('/sector-leads/:userId/sectors', ...adminRoles, putSectorLeadSectorsAdmin);
 
 router.get('/compliance-filings/meta', ...complianceAdmin, getMeta);
 router.get('/compliance-filings/overview', ...complianceAdmin, getOverview);

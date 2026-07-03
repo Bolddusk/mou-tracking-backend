@@ -1,4 +1,9 @@
 const pool = require('../config/db');
+const {
+  sectorLeadCoversSector,
+  sectorLeadHasAnySector,
+  getSectorLeadScopedSectors,
+} = require('./sectorLeadAssignments');
 
 const PARTY_B_ROLES = new Set(['party_b', 'investor']);
 
@@ -29,6 +34,15 @@ async function partyBHasProposalInSector(partyBUserId, sector) {
   return matchmaking.count > 0;
 }
 
+async function partyBHasProposalInAnySector(partyBUserId, sectors) {
+  for (const sector of sectors) {
+    if (await partyBHasProposalInSector(partyBUserId, sector)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function assertCanViewPartyBProfile(viewer, targetUserId) {
   const targetId = Number(targetUserId);
   if (!targetId) {
@@ -49,10 +63,11 @@ async function assertCanViewPartyBProfile(viewer, targetUserId) {
   }
 
   if (viewer.role === 'sector_lead') {
-    if (!viewer.sector) {
+    const sectors = getSectorLeadScopedSectors(viewer);
+    if (!sectors.length) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
-    const inSector = await partyBHasProposalInSector(targetId, viewer.sector);
+    const inSector = await partyBHasProposalInAnySector(targetId, sectors);
     if (!inSector) {
       return {
         error: 'This Party B has no linked proposals in your sector',
@@ -89,10 +104,10 @@ async function assertCanViewPartyBProfileOnProposal(viewer, targetUserId, propos
   }
 
   if (viewer.role === 'sector_lead') {
-    if (!viewer.sector) {
+    if (!sectorLeadHasAnySector(viewer)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
-    if (proposal.sector !== viewer.sector) {
+    if (!sectorLeadCoversSector(viewer, proposal.sector)) {
       return { error: 'Access denied — wrong sector', status: 403 };
     }
     return { ok: true, user, read_only: true };

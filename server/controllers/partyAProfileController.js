@@ -13,6 +13,7 @@ const {
   hasValue,
 } = require('../utils/partyAProfile');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
+const { getSectorLeadScopedSectors } = require('../utils/sectorLeadAssignments');
 const { assertCanViewPartyAProfile, getPartyAUser } = require('../utils/partyAProfileAccess');
 
 function formatUserSummary(user) {
@@ -143,11 +144,12 @@ async function listPartyAProfiles(req, res) {
     }
 
     if (req.user.role === 'sector_lead') {
-      if (!req.user.sector) {
+      const sectorScopes = getSectorLeadScopedSectors(req.user);
+      if (!sectorScopes.length) {
         return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
       }
 
-      const sector = req.user.sector;
+      const sectorPlaceholders = sectorScopes.map(() => '?').join(', ');
       const [rows] = await pool.query(
         `SELECT DISTINCT u.id, u.full_name, u.email, u.organization, u.phone,
                 p.company_name, p.profile_complete, p.updated_at AS profile_updated_at
@@ -157,17 +159,22 @@ async function listPartyAProfiles(req, res) {
            AND (
              u.id IN (
                SELECT party_a_id FROM proposals
-               WHERE sector = ? AND status != 'draft'
+               WHERE sector IN (${sectorPlaceholders}) AND status != 'draft'
              )
              OR u.id IN (
                SELECT submitted_by FROM mm_proposals
-               WHERE sector = ? AND side = 'side_a' AND status != 'draft'
+               WHERE sector IN (${sectorPlaceholders}) AND side = 'side_a' AND status != 'draft'
              )
            )
          ORDER BY u.full_name ASC`,
-        [sector, sector]
+        [...sectorScopes, ...sectorScopes]
       );
-      return res.json({ profiles: rows, scope: 'sector', sector });
+      return res.json({
+        profiles: rows,
+        scope: 'sectors',
+        sectors: sectorScopes,
+        sector: sectorScopes.length === 1 ? sectorScopes[0] : null,
+      });
     }
 
     return res.status(403).json({ error: 'Forbidden' });

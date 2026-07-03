@@ -2,6 +2,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.e
 
 const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
+const { DEFAULT_SECTOR_LEAD_EMAIL } = require('../constants/seedDefaults');
 
 const TEST_USERS = [
   {
@@ -21,15 +22,6 @@ const TEST_USERS = [
     sector: null,
     organization: 'GreenTech Pakistan',
     phone: '03009876543',
-  },
-  {
-    full_name: 'Hasnain Lodhi',
-    email: 'sectorlead@test.com',
-    password: 'password123',
-    role: 'sector_lead',
-    sector: 'Agri-chemicals & Inputs',
-    organization: 'Ministry of National Food Security & Research',
-    phone: '03007654321',
   },
   {
     full_name: 'Super Admin',
@@ -76,7 +68,7 @@ async function seed() {
     ]);
 
     if (existing.length > 0) {
-      if (user.email === 'sectorlead@test.com' || user.email === 'investor@test.com') {
+      if (user.email === 'investor@test.com') {
         await pool.query(
           `UPDATE users SET full_name = ?, role = ?, sector = ?, organization = ?, phone = ? WHERE email = ?`,
           [
@@ -115,7 +107,7 @@ async function seed() {
   console.log('\n--- Test Credentials ---');
   console.log('Party A #1:    partya@test.com       / password123  (Khan Industries)');
   console.log('Party A #2:    partya2@test.com      / password123  (GreenTech Pakistan)');
-  console.log('Sector Lead:   sectorlead@test.com   / password123  (Agri-chemicals & Inputs)');
+  console.log(`Sector Leads:  npm run db:seed:sector-leads  (e.g. ${DEFAULT_SECTOR_LEAD_EMAIL})`);
   console.log('Super Admin:   superadmin@test.com   / password123');
   console.log('Regional FP:   rfp@test.com            / password123  (Punjab Region)');
   console.log('Regional FP:   rfp2@test.com           / password123  (Sindh Region)');

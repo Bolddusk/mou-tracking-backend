@@ -10,6 +10,10 @@ const {
   buildMouStatusWithVersions,
 } = require('../utils/mouFileVersions');
 const { isMatchDealClosed, MATCH_DEAL_CLOSED_ERROR } = require('../utils/dealClose');
+const {
+  sectorLeadCoversSector,
+  sectorLeadHasAnySector,
+} = require('../utils/sectorLeadAssignments');
 
 const MOU_FIELDS = ['mou_scope', 'mou_description', 'mou_sector', 'mou_demand', 'mou_file_url'];
 const MOU_STATUSES = new Set(['not_started', 'in_progress', 'uploaded', 'signed', 'deal_closed']);
@@ -69,10 +73,10 @@ function matchHasEngagement(match) {
 }
 
 function sectorLeadCanAccessMatch(req, match) {
-  if (!req.user.sector) {
+  if (!sectorLeadHasAnySector(req.user)) {
     return { error: 'Sector lead profile has no sector assigned', status: 400 };
   }
-  if (match.matched_by === req.user.id || match.sector === req.user.sector) {
+  if (match.matched_by === req.user.id || sectorLeadCoversSector(req.user, match.sector)) {
     return { ok: true };
   }
   return { error: 'Access denied — wrong sector', status: 403 };

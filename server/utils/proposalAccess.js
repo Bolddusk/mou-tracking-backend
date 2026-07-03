@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { isProposalLocked, canCloseProposalDeal } = require('./dealClose');
 const { permissionMatchesGrant } = require('./rolePermissions');
+const { sectorLeadCoversSector, sectorLeadHasAnySector } = require('./sectorLeadAssignments');
 
 async function getMatchForEngagement(proposalId) {
   const [rows] = await pool.query(
@@ -38,7 +39,7 @@ async function sectorLeadCanAccessProposal(req, proposal) {
   if (proposal.status === 'draft') {
     return { ok: false, reason: 'draft' };
   }
-  if (proposal.sector === req.user.sector) {
+  if (sectorLeadCoversSector(req.user, proposal.sector)) {
     return { ok: true, viaMatchmaking: false };
   }
   const matched = await getMatchForEngagement(proposal.id);
@@ -53,7 +54,7 @@ async function checkProposalAccess(req, proposal) {
     return { error: 'Proposal not found', status: 404 };
   }
 
-  if (req.user.role === 'super_admin') {
+  if (['super_admin', 'admin'].includes(req.user.role)) {
     return { ok: true, proposal };
   }
 
@@ -85,7 +86,7 @@ async function checkProposalAccess(req, proposal) {
   }
 
   if (req.user.role === 'sector_lead') {
-    if (!req.user.sector) {
+    if (!sectorLeadHasAnySector(req.user)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
     const slAccess = await sectorLeadCanAccessProposal(req, proposal);
@@ -113,6 +114,34 @@ async function checkProposalAccess(req, proposal) {
   return { error: 'Access denied', status: 403 };
 }
 
+function canEditProposalFields(req, proposal, access) {
+  if (!access?.ok) {
+    return { ok: false, error: access?.error || 'Access denied', status: access?.status || 403 };
+  }
+
+  const locked = isProposalLocked(proposal);
+  if (locked && !['super_admin', 'admin'].includes(req.user.role)) {
+    return {
+      ok: false,
+      locked: true,
+      error: 'Deal is closed — fields cannot be edited',
+      status: 400,
+    };
+  }
+
+  if (proposal.status === 'draft') {
+    if (req.user.role === 'party_a' && proposal.party_a_id === req.user.id) {
+      return { ok: true, locked: false };
+    }
+    if (['super_admin', 'admin'].includes(req.user.role)) {
+      return { ok: true, locked: false };
+    }
+    return { ok: false, error: 'Only the proposal owner can edit drafts', status: 403 };
+  }
+
+  return { ok: true, locked };
+}
+
 async function checkApprovedPartyChatAccess(user, proposal) {
   if (!proposal) {
     return { error: 'Proposal not found', status: 404 };
@@ -129,10 +158,10 @@ async function checkApprovedPartyChatAccess(user, proposal) {
       }
 
       if (user.role === 'sector_lead') {
-        if (!user.sector) {
+        if (!sectorLeadHasAnySector(user)) {
           return { error: 'Sector lead profile has no sector assigned', status: 400 };
         }
-        if (proposal.sector === user.sector) {
+        if (sectorLeadCoversSector(user, proposal.sector)) {
           return { ok: true, proposal, canSend: true };
         }
         return { error: 'Access denied — proposal is outside your sector', status: 403 };
@@ -170,10 +199,10 @@ async function checkApprovedPartyChatAccess(user, proposal) {
   }
 
   if (user.role === 'sector_lead') {
-    if (!user.sector) {
+    if (!sectorLeadHasAnySector(user)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
-    if (proposal.sector === user.sector) {
+    if (sectorLeadCoversSector(user, proposal.sector)) {
       return { ok: true, proposal, canSend: true };
     }
     const match = await getMatchForEngagement(proposal.id);
@@ -224,11 +253,15 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     can_view_mou: false,
     can_close_deal: false,
     can_edit_party_contacts: false,
+    can_edit_fields: false,
     can_approve: false,
     can_reject: false,
   };
 
   if (!access.ok) return caps;
+
+  const editAccess = canEditProposalFields(req, proposal, access);
+  caps.can_edit_fields = editAccess.ok;
 
   const role = req.user.role;
   const perms = userPermissions || req.userPermissions || [];
@@ -244,7 +277,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
       (permissionMatchesGrant('proposals.approve', perms) &&
         role === 'sector_lead' &&
         proposal.status !== 'draft' &&
-        (proposal.sector === req.user.sector || access.viaMatchmaking)));
+        (sectorLeadCoversSector(req.user, proposal.sector) || access.viaMatchmaking)));
 
   if (canApproveReject) {
     caps.can_approve = role === 'super_admin' || permissionMatchesGrant('proposals.approve', perms);
@@ -278,7 +311,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
   const sectorLeadAllowed =
     role === 'sector_lead' &&
     proposal.status !== 'draft' &&
-    (proposal.sector === req.user.sector || access.viaMatchmaking);
+    (sectorLeadCoversSector(req.user, proposal.sector) || access.viaMatchmaking);
 
   if (sectorLeadAllowed) {
     caps.can_view_chat = ready && !locked;
@@ -321,6 +354,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
 
 module.exports = {
   checkProposalAccess,
+  canEditProposalFields,
   checkApprovedPartyChatAccess,
   isProposalOwnerForActivities,
   hasRfpApprovedMatchAccess,

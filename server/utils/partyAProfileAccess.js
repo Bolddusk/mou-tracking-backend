@@ -1,4 +1,9 @@
 const pool = require('../config/db');
+const {
+  sectorLeadCoversSector,
+  sectorLeadHasAnySector,
+  getSectorLeadScopedSectors,
+} = require('./sectorLeadAssignments');
 
 async function getPartyAUser(userId) {
   const [rows] = await pool.query(
@@ -27,6 +32,15 @@ async function partyAHasProposalInSector(partyAId, sector) {
   return matchmaking.count > 0;
 }
 
+async function partyAHasProposalInAnySector(partyAId, sectors) {
+  for (const sector of sectors) {
+    if (await partyAHasProposalInSector(partyAId, sector)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function assertCanViewPartyAProfile(viewer, targetUserId) {
   const targetId = Number(targetUserId);
   if (!targetId) {
@@ -47,10 +61,11 @@ async function assertCanViewPartyAProfile(viewer, targetUserId) {
   }
 
   if (viewer.role === 'sector_lead') {
-    if (!viewer.sector) {
+    const sectors = getSectorLeadScopedSectors(viewer);
+    if (!sectors.length) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
-    const inSector = await partyAHasProposalInSector(targetId, viewer.sector);
+    const inSector = await partyAHasProposalInAnySector(targetId, sectors);
     if (!inSector) {
       return {
         error: 'This Party A has no submitted proposals in your sector',
@@ -82,10 +97,10 @@ async function assertCanViewPartyAProfileOnProposal(viewer, targetUserId, propos
   }
 
   if (viewer.role === 'sector_lead') {
-    if (!viewer.sector) {
+    if (!sectorLeadHasAnySector(viewer)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
-    if (proposal.sector !== viewer.sector) {
+    if (!sectorLeadCoversSector(viewer, proposal.sector)) {
       return { error: 'Access denied — wrong sector', status: 403 };
     }
     return { ok: true, user, read_only: true };

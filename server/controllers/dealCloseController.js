@@ -2,6 +2,10 @@ const pool = require('../config/db');
 const { checkProposalAccess, buildProposalCapabilities } = require('../utils/proposalAccess');
 const { enrichProposalRow } = require('../utils/proposalTemplate');
 const {
+  sectorLeadCoversSector,
+  sectorLeadHasAnySector,
+} = require('../utils/sectorLeadAssignments');
+const {
   isProposalLocked,
   isMatchDealClosed,
   canCloseProposalDeal,
@@ -52,10 +56,10 @@ async function closeProposalDeal(req, res) {
     }
 
     if (req.user.role === 'sector_lead') {
-      if (!req.user.sector) {
+      if (!sectorLeadHasAnySector(req.user)) {
         return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
       }
-      if (proposal.sector !== req.user.sector) {
+      if (!sectorLeadCoversSector(req.user, proposal.sector)) {
         return res.status(403).json({ error: 'Access denied — wrong sector' });
       }
     }

@@ -16,7 +16,8 @@ const {
 } = require('../utils/agriMouImport');
 
 const PARTY_A_EMAIL = process.env.IMPORT_PARTY_A_EMAIL || 'superadmin@test.com';
-const SECTOR_LEAD_EMAIL = process.env.IMPORT_SECTOR_LEAD_EMAIL || 'sectorlead@test.com';
+const { DEFAULT_SECTOR_LEAD_EMAIL } = require('../constants/seedDefaults');
+const SECTOR_LEAD_EMAIL = process.env.IMPORT_SECTOR_LEAD_EMAIL || DEFAULT_SECTOR_LEAD_EMAIL;
 const EXCEL_PATH = process.env.AGRI_MOU_EXCEL_PATH || DEFAULT_EXCEL;
 
 async function requireUser(email, label) {

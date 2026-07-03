@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const { ROLE_LABELS } = require('../utils/userHelpers');
 const { buildRbacPayload } = require('../utils/rolePermissions');
+const { attachSectorLeadSectors } = require('../utils/sectorLeadAssignments');
 
 const FALLBACK_REDIRECT_BY_ROLE = {
   party_a: '/dashboard/party-a',
@@ -34,7 +35,7 @@ function signToken(user) {
 }
 
 function publicUser(user) {
-  return {
+  const base = {
     id: user.id,
     full_name: user.full_name,
     email: user.email,
@@ -47,6 +48,13 @@ function publicUser(user) {
     must_change_password: Boolean(user.must_change_password),
     created_at: user.created_at || null,
   };
+
+  if (user.role === 'sector_lead') {
+    base.assigned_sectors = user.assigned_sectors || (user.sector ? [user.sector] : []);
+    base.primary_sector = user.primary_sector || user.sector || null;
+  }
+
+  return base;
 }
 
 function resolveRedirect(user, rbac) {
@@ -57,11 +65,12 @@ function resolveRedirect(user, rbac) {
 }
 
 async function authResponse(user) {
-  const rbac = await buildRbacPayload(user);
+  const enriched = await attachSectorLeadSectors(user);
+  const rbac = await buildRbacPayload(enriched);
   return {
-    token: signToken(user),
-    user: publicUser(user),
-    redirect: resolveRedirect(user, rbac),
+    token: signToken(enriched),
+    user: publicUser(enriched),
+    redirect: resolveRedirect(enriched, rbac),
     rbac,
   };
 }
@@ -138,10 +147,11 @@ async function getMe(req, res) {
     }
 
     const user = rows[0];
-    const rbac = await buildRbacPayload(user);
+    const enriched = await attachSectorLeadSectors(user);
+    const rbac = await buildRbacPayload(enriched);
     return res.json({
-      user: publicUser(user),
-      redirect: resolveRedirect(user, rbac),
+      user: publicUser(enriched),
+      redirect: resolveRedirect(enriched, rbac),
       rbac,
     });
   } catch (err) {

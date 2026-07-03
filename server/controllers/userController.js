@@ -48,20 +48,38 @@ function validateRoleAndSector(role, sector) {
 
 async function getSectorLeads(req, res) {
   try {
-    let query = `SELECT id, full_name, email, sector
-       FROM users
-       WHERE role = 'sector_lead'`;
+    let query = `SELECT u.id, u.full_name, u.email, u.sector AS primary_sector
+       FROM users u
+       WHERE u.role = 'sector_lead'`;
     const params = [];
 
     if (req.query.sector) {
-      query += ' AND sector = ?';
+      query += ` AND EXISTS (
+        SELECT 1 FROM sector_lead_assignments a
+        WHERE a.user_id = u.id AND a.sector = ?
+      )`;
       params.push(req.query.sector);
     }
 
-    query += ' ORDER BY sector ASC, full_name ASC';
+    query += ' ORDER BY u.full_name ASC';
 
     const [rows] = await pool.query(query, params);
-    return res.json(rows);
+
+    const enriched = [];
+    for (const row of rows) {
+      const [assignments] = await pool.query(
+        `SELECT sector, is_primary FROM sector_lead_assignments
+         WHERE user_id = ? ORDER BY is_primary DESC, sector ASC`,
+        [row.id]
+      );
+      enriched.push({
+        ...row,
+        sectors: assignments.map((a) => a.sector),
+        sector: row.primary_sector,
+      });
+    }
+
+    return res.json(enriched);
   } catch (err) {
     console.error('Get sector leads error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch sector leads' });

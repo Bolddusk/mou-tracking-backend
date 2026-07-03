@@ -25,9 +25,14 @@ const {
 } = require('../controllers/activityController');
 const { getProposalChatMessages } = require('../controllers/proposalChatController');
 const { exportProposalReport } = require('../controllers/proposalReportController');
+const { getConferenceReport } = require('../controllers/conferenceReportController');
 const { getProposalMou, saveProposalMou, getProposalMouStatus, acknowledgeProposalMou, getProposalMouVersions } = require('../controllers/proposalMouController');
 const { closeProposalDeal } = require('../controllers/dealCloseController');
 const { updateProposalPartyContacts } = require('../controllers/proposalPartyContactController');
+const {
+  getProposalEditableFields,
+  updateProposalFields,
+} = require('../controllers/proposalFieldsController');
 
 const router = express.Router();
 
@@ -54,6 +59,10 @@ const reviewerListRoles = [
 const approveProposalRoles = [verifyToken, requireAnyPermission('proposals.approve')];
 const rejectProposalRoles = [verifyToken, requireAnyPermission('proposals.reject')];
 const exportReportRoles = [verifyToken, requireAnyPermission('proposals.export')];
+const conferenceReportRoles = [
+  verifyToken,
+  requireRole('super_admin', 'admin', 'sector_lead'),
+];
 const editContactsRoles = [verifyToken, requireAnyPermission('proposals.edit_contacts')];
 const proposalViewRoles = [
   verifyToken,
@@ -91,6 +100,7 @@ router.get('/sector-lead', ...sectorLeadList, getSectorLeadProposals);
 
 // Sector Lead + Super Admin (filter dropdowns)
 router.get('/filter-options', ...reviewerListRoles, getProposalFilterOptions);
+router.get('/conference-report', ...conferenceReportRoles, getConferenceReport);
 router.get('/all', ...allProposalsList, getAllProposals);
 
 // Activities (before /:id)
@@ -103,6 +113,8 @@ router.post('/:proposalId/poke', ...approveProposalRoles, pokeForUpdate);
 router.patch('/:id/approve', ...approveProposalRoles, approveProposal);
 router.patch('/:id/reject', ...rejectProposalRoles, rejectProposal);
 router.patch('/:id/party-contacts', ...editContactsRoles, updateProposalPartyContacts);
+router.get('/:id/editable-fields', ...proposalViewRoles, getProposalEditableFields);
+router.patch('/:id/fields', ...proposalViewRoles, updateProposalFields);
 
 // Export report — before /:id
 router.get('/:id/export-report', ...exportReportRoles, exportProposalReport);

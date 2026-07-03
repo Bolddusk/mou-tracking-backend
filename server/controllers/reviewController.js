@@ -19,6 +19,12 @@ const {
 const { MOU_LIFECYCLE_LABELS } = require('../utils/mouLifecycle');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
 const {
+  sectorLeadCoversSector,
+  sectorLeadHasAnySector,
+  getSectorLeadScopedSectors,
+} = require('../utils/sectorLeadAssignments');
+const { conferenceSupportsReport } = require('../constants/conferences');
+const {
   loadPartyAProfileSnapshot,
   loadPartyBProfileSnapshot,
 } = require('../utils/partyProfileSnapshots');
@@ -43,25 +49,30 @@ async function getProposalById(proposalId) {
 async function fetchPaginatedProposalList(req, res, options = {}) {
   await ensureSectorCache();
 
-  const sectorScope = options.sectorScope || null;
-  const activeSectors = sectorScope ? [sectorScope] : getActiveSectorNames();
+  const sectorScopes =
+    options.sectorScopes?.length > 0
+      ? options.sectorScopes
+      : options.sectorScope
+        ? [options.sectorScope]
+        : null;
+  const activeSectors = sectorScopes || getActiveSectorNames();
 
   const validationErrors = validateProposalListQuery(req.query, activeSectors, {
-    ignoreSectorFilter: Boolean(sectorScope),
+    ignoreSectorFilter: Boolean(sectorScopes?.length),
   });
   if (validationErrors.length) {
     return res.status(400).json({ error: validationErrors[0] });
   }
 
   const { page, limit, offset } = parsePagination(req.query);
-  const { sql, params } = buildProposalListWhere(req.query, { sectorScope });
+  const { sql, params } = buildProposalListWhere(req.query, { sectorScopes, sectorScope: options.sectorScope });
 
   const countQuery = `SELECT COUNT(*) AS total ${PROPOSAL_LIST_FROM_SQL}${sql}`;
   const [[countRow]] = await pool.query(countQuery, params);
   const total = Number(countRow.total) || 0;
   const totalPages = total ? Math.ceil(total / limit) : 0;
 
-  const orderBy = sectorScope
+  const orderBy = sectorScopes?.length
     ? ' ORDER BY COALESCE(p.last_resubmitted_at, p.submitted_at, p.created_at) DESC, p.id DESC'
     : ' ORDER BY p.created_at DESC, p.id DESC';
 
@@ -80,17 +91,18 @@ async function fetchPaginatedProposalList(req, res, options = {}) {
       has_next: page < totalPages,
       has_prev: page > 1,
     },
-    filters: buildListFiltersEcho(req.query, { sectorScope }),
+    filters: buildListFiltersEcho(req.query, { sectorScopes, sectorScope: options.sectorScope }),
   });
 }
 
 async function getSectorLeadProposals(req, res) {
   try {
-    if (!req.user.sector) {
+    const sectorScopes = getSectorLeadScopedSectors(req.user);
+    if (!sectorScopes.length) {
       return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
     }
 
-    return fetchPaginatedProposalList(req, res, { sectorScope: req.user.sector });
+    return fetchPaginatedProposalList(req, res, { sectorScopes });
   } catch (err) {
     console.error('Sector lead proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
@@ -110,19 +122,19 @@ async function getProposalFilterOptions(req, res) {
   try {
     await ensureSectorCache();
 
-    const sectorScope =
-      req.user.role === 'sector_lead' ? String(req.user.sector || '').trim() : null;
+    const sectorScopes =
+      req.user.role === 'sector_lead' ? getSectorLeadScopedSectors(req.user) : null;
 
-    if (req.user.role === 'sector_lead' && !sectorScope) {
+    if (req.user.role === 'sector_lead' && !sectorScopes.length) {
       return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
     }
 
     const conferenceParams = [];
     let conferenceWhere =
       'WHERE conference_key IS NOT NULL AND conference_name IS NOT NULL';
-    if (sectorScope) {
-      conferenceWhere += ' AND sector = ?';
-      conferenceParams.push(sectorScope);
+    if (sectorScopes?.length) {
+      conferenceWhere += ` AND sector IN (${sectorScopes.map(() => '?').join(', ')})`;
+      conferenceParams.push(...sectorScopes);
     }
 
     const [conferences] = await pool.query(
@@ -140,7 +152,7 @@ async function getProposalFilterOptions(req, res) {
       conferenceParams
     );
 
-    const sectors = sectorScope ? [sectorScope] : getActiveSectorNames();
+    const sectors = sectorScopes?.length ? sectorScopes : getActiveSectorNames();
 
     return res.json({
       proposal_statuses: PROPOSAL_STATUSES,
@@ -159,9 +171,11 @@ async function getProposalFilterOptions(req, res) {
         mou_count: Number(row.mou_count),
         jv_count: Number(row.jv_count),
         agreement_count: Number(row.agreement_count),
+        supports_report: conferenceSupportsReport(row.conference_key),
       })),
       sectors,
-      scoped_sector: sectorScope || null,
+      scoped_sector: sectorScopes?.length === 1 ? sectorScopes[0] : req.user.primary_sector || null,
+      scoped_sectors: sectorScopes?.length ? sectorScopes : null,
       pagination_defaults: {
         page: 1,
         limit: 20,
@@ -210,8 +224,12 @@ async function verifyReviewAccess(req, proposal) {
     return { proposal };
   }
   if (req.user.role === 'sector_lead') {
-    if (!req.user.sector) return { error: 'Sector lead profile has no sector assigned', status: 400 };
-    if (proposal.sector !== req.user.sector) return { error: 'Access denied — wrong sector', status: 403 };
+    if (!sectorLeadHasAnySector(req.user)) {
+      return { error: 'Sector lead profile has no sector assigned', status: 400 };
+    }
+    if (!sectorLeadCoversSector(req.user, proposal.sector)) {
+      return { error: 'Access denied — wrong sector', status: 403 };
+    }
     return { proposal };
   }
   return { error: 'Access denied', status: 403 };

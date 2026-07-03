@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { hasPermission } = require('../utils/rolePermissions');
+const { attachSectorLeadSectors } = require('../utils/sectorLeadAssignments');
 
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -12,7 +13,12 @@ function verifyToken(req, res, next) {
 
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
-    next();
+    attachSectorLeadSectors(req.user)
+      .then((user) => {
+        req.user = user;
+        next();
+      })
+      .catch(next);
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }

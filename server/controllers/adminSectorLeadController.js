@@ -1,5 +1,12 @@
 const pool = require('../config/db');
 const { getActiveSectorNames, ensureSectorCache } = require('../utils/sectorRegistry');
+const {
+  userIsAssignedToSector,
+  getSectorLeadUserIdsForSector,
+  listSectorLeadsWithAssignments,
+  getAssignmentsForUser,
+  replaceAssignments,
+} = require('../utils/sectorLeadAssignments');
 
 const COMPLAINT_CLOSED = ['resolved', 'rejected'];
 const MM_PROPOSAL_CLOSED = ['matched', 'rejected'];
@@ -34,10 +41,9 @@ async function reassignSectorLead(req, res) {
     if (!newSl || newSl.role !== 'sector_lead') {
       return res.status(400).json({ error: 'new_sl_user_id must be a valid Sector Lead user' });
     }
-    if (newSl.sector !== sector) {
+    if (!(await userIsAssignedToSector(newSlUserId, sector))) {
       return res.status(400).json({
-        error: 'New Sector Lead sector does not match requested sector',
-        user_sector: newSl.sector,
+        error: 'New Sector Lead is not assigned to the requested sector',
         requested_sector: sector,
       });
     }
@@ -46,11 +52,7 @@ async function reassignSectorLead(req, res) {
     try {
       await connection.beginTransaction();
 
-      const [oldRows] = await connection.query(
-        `SELECT id FROM users WHERE role = 'sector_lead' AND sector = ? AND id != ?`,
-        [sector, newSlUserId]
-      );
-      const oldSlIds = oldRows.map((r) => r.id);
+      const oldSlIds = await getSectorLeadUserIdsForSector(sector, newSlUserId, connection);
 
       let complaintsUpdated = 0;
       let mmProposalsUpdated = 0;
@@ -213,8 +215,89 @@ async function getOrphans(req, res) {
   }
 }
 
+async function listSectorLeadsAdmin(req, res) {
+  try {
+    const sector = req.query.sector?.trim() || null;
+    const leads = await listSectorLeadsWithAssignments(sector);
+    return res.json({ sector_leads: leads, count: leads.length });
+  } catch (err) {
+    console.error('List sector leads error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch sector leads' });
+  }
+}
+
+async function getSectorLeadSectorsAdmin(req, res) {
+  try {
+    const userId = Number(req.params.userId);
+    if (!userId) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const user = await getSectorLeadById(userId);
+    if (!user || user.role !== 'sector_lead') {
+      return res.status(404).json({ error: 'Sector Lead user not found' });
+    }
+
+    const assignments = await getAssignmentsForUser(userId);
+    return res.json({
+      user_id: userId,
+      full_name: user.full_name,
+      email: user.email,
+      primary_sector: assignments.find((a) => a.is_primary)?.sector || assignments[0]?.sector || user.sector,
+      sectors: assignments.map((a) => a.sector),
+      assignments,
+    });
+  } catch (err) {
+    console.error('Get sector lead sectors error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch sector assignments' });
+  }
+}
+
+async function putSectorLeadSectorsAdmin(req, res) {
+  try {
+    const userId = Number(req.params.userId);
+    if (!userId) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const user = await getSectorLeadById(userId);
+    if (!user || user.role !== 'sector_lead') {
+      return res.status(404).json({ error: 'Sector Lead user not found' });
+    }
+
+    const sectors = Array.isArray(req.body.sectors) ? req.body.sectors : null;
+    if (!sectors?.length) {
+      return res.status(400).json({ error: 'sectors array is required (at least one sector)' });
+    }
+
+    const result = await replaceAssignments(userId, sectors, {
+      primarySector: req.body.primary_sector || null,
+      assignedBy: req.user.id,
+    });
+
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    return res.json({
+      message: 'Sector assignments updated',
+      user_id: userId,
+      primary_sector: result.primary_sector,
+      sectors: result.sectors,
+      assignments: result.assignments,
+    });
+  } catch (err) {
+    console.error('Put sector lead sectors error:', err.message);
+    return res.status(500).json({ error: 'Failed to update sector assignments' });
+  }
+}
+
 module.exports = {
   reassignSectorLead,
   getReassignments,
   getOrphans,
+  listSectorLeadsAdmin,
+  getSectorLeadSectorsAdmin,
+  putSectorLeadSectorsAdmin,
 };
+

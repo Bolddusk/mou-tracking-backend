@@ -8,6 +8,7 @@
     "dev": "nodemon server/server.js",
     "db:init": "node server/scripts/initDb.js",
     "db:seed": "node server/scripts/seed.js",
+    "db:seed:sector-leads": "node server/scripts/seedSectorLeads.js",
     "db:seed:fresh": "node server/scripts/seedFreshStart.js",
     "db:seed:demo-proposal": "node server/scripts/seedDemoProposal.js",
     "db:seed:email-test-proposal": "node server/scripts/seedEmailTestProposal.js",
@@ -31,6 +32,7 @@
     "db:migrate:cooperation-mode": "node server/scripts/migrateCooperationMode.js",
     "db:migrate:conference-fields": "node server/scripts/migrateConferenceFields.js",
     "db:migrate:sectors": "node server/scripts/migrateSectors.js",
+    "db:migrate:sector-lead-assignments": "node server/scripts/migrateSectorLeadAssignments.js",
     "db:import:agri-signed-mous": "node server/scripts/importAgriSignedMous.js",
     "db:import:islamabad-agri-tech-mous": "node server/scripts/importIslamabadAgriTechMous.js",
     "db:import:islamabad-agri-b2b-mous": "node server/scripts/importIslamabadAgriB2bMous.js",
@@ -76,6 +78,7 @@
     "db:migrate:mm-match-engagement": "node server/scripts/migrateMmMatchEngagement.js",
     "db:rollback:multi-country": "node server/scripts/rollbackMultiCountryMatchmaking.js",
     "db:rollback:matchmaking": "node server/scripts/rollbackMatchmaking.js",
+    "puppeteer:install-chrome": "puppeteer browsers install chrome",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -95,6 +98,7 @@
     "mysql2": "^3.22.4",
     "nodemailer": "^8.0.10",
     "pdfkit": "^0.19.0",
+    "puppeteer": "^25.3.0",
     "sequelize": "^6.37.8",
     "socket.io": "^4.8.3"
   },

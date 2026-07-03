@@ -65,11 +65,16 @@ function validateProposalListQuery(query, activeSectors = getActiveSectorNames()
 function buildProposalListWhere(query, options = {}) {
   const conditions = [];
   const params = [];
+  const scopedSectors =
+    options.sectorScopes?.length > 0
+      ? options.sectorScopes
+      : options.sectorScope
+        ? [options.sectorScope]
+        : null;
 
-  if (options.sectorScope) {
-    conditions.push('p.sector = ?');
-    params.push(options.sectorScope);
-    // Party A drafts are private until submitted — sector lead cannot open detail.
+  if (scopedSectors?.length) {
+    conditions.push(`p.sector IN (${scopedSectors.map(() => '?').join(', ')})`);
+    params.push(...scopedSectors);
     conditions.push("p.status != 'draft'");
   }
 
@@ -78,7 +83,7 @@ function buildProposalListWhere(query, options = {}) {
     params.push(query.status);
   }
 
-  if (!options.sectorScope && query.sector) {
+  if (!scopedSectors?.length && query.sector) {
     conditions.push('p.sector = ?');
     params.push(query.sector);
   }
@@ -140,11 +145,19 @@ function buildProposalListWhere(query, options = {}) {
 }
 
 function buildListFiltersEcho(query, options = {}) {
+  const scopedSectors =
+    options.sectorScopes?.length > 0
+      ? options.sectorScopes
+      : options.sectorScope
+        ? [options.sectorScope]
+        : null;
+
   return {
     conference_key: query.conference_key || null,
     cooperation_mode: query.cooperation_mode || null,
     status: query.status || null,
-    sector: options.sectorScope || query.sector || null,
+    sector: scopedSectors?.length === 1 ? scopedSectors[0] : query.sector || null,
+    sectors: scopedSectors?.length > 1 ? scopedSectors : null,
     mou_lifecycle: query.mou_lifecycle || null,
     q: query.q || null,
     date_from: query.date_from || null,

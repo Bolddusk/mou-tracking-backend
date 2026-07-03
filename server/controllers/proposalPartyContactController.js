@@ -8,6 +8,7 @@ const { enrichProposalRow } = require('../utils/proposalTemplate');
 const { attachPokeStatus } = require('../utils/pokeStatus');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const { provisionPartyAForProposal } = require('../utils/partyAProvisioner');
+const { sectorLeadHasAnySector } = require('../utils/sectorLeadAssignments');
 
 const PARTY_A_INFO_FIELDS = [
   'entity_type',
@@ -58,7 +59,7 @@ async function verifyPartyContactEditAccess(req, proposal) {
   }
 
   if (req.user.role === 'sector_lead') {
-    if (!req.user.sector) {
+    if (!sectorLeadHasAnySector(req.user)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
     const slAccess = await sectorLeadCanAccessProposal(req, proposal);
