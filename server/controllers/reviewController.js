@@ -18,6 +18,7 @@ const {
 } = require('../utils/proposalListFilters');
 const { MOU_LIFECYCLE_LABELS } = require('../utils/mouLifecycle');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
+const { listActiveSifcCategories } = require('../utils/sifcCategoryRegistry');
 const {
   sectorLeadCoversSector,
   sectorLeadHasAnySector,
@@ -153,6 +154,7 @@ async function getProposalFilterOptions(req, res) {
     );
 
     const sectors = sectorScopes?.length ? sectorScopes : getActiveSectorNames();
+    const sifcCategories = (await listActiveSifcCategories()).map((row) => row.name);
 
     return res.json({
       proposal_statuses: PROPOSAL_STATUSES,
@@ -164,6 +166,7 @@ async function getProposalFilterOptions(req, res) {
         value,
         label: COOPERATION_MODE_LABELS[value],
       })),
+      sifc_categories: sifcCategories,
       conferences: conferences.map((row) => ({
         key: row.conference_key,
         name: row.conference_name,

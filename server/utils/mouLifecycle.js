@@ -6,11 +6,10 @@ const MOU_LIFECYCLE_LABELS = {
   execution: 'Execution',
 };
 
-/** SQL: proposal is in execution (contract / deal closed). */
+/** SQL: proposal is in execution (contract / deal closed). Agreement cooperation mode stays active. */
 const EXECUTION_SQL = `(
   p.mou_status = 'deal_closed'
   OR p.status = 'completed'
-  OR p.cooperation_mode = 'agreement'
   OR p.deal_closed_at IS NOT NULL
   OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.executive_summary, '$.mou_operational_status')), '')) LIKE '%execution%'
 )`;
@@ -59,7 +58,6 @@ function isExecutionPhase(proposal) {
   return (
     proposal.mou_status === 'deal_closed' ||
     proposal.status === 'completed' ||
-    proposal.cooperation_mode === 'agreement' ||
     Boolean(proposal.deal_closed_at)
   );
 }

@@ -232,6 +232,8 @@ function enrichProposalRow(row) {
     contact_info,
     display_title,
     proposal_title: display_title,
+    pakistani_company: row.company_name || party_a_info.organization_name || null,
+    chinese_company: row.party_b_name || row.party_b_organization || null,
     mou_lifecycle,
     mou_lifecycle_label: MOU_LIFECYCLE_LABELS[mou_lifecycle] || mou_lifecycle,
   };

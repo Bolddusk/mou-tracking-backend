@@ -11,6 +11,7 @@
     "db:seed:sector-leads": "node server/scripts/seedSectorLeads.js",
     "db:seed:portfolio-fresh": "node server/scripts/seedPortfolioFresh.js",
     "db:seed:portfolio-lookups": "node server/scripts/seedPortfolioLookups.js",
+    "db:backfill:qa-mou-fixes": "node server/scripts/backfillQaMouFixes.js",
     "db:seed:fresh": "node server/scripts/seedFreshStart.js",
     "db:seed:demo-proposal": "node server/scripts/seedDemoProposal.js",
     "db:seed:email-test-proposal": "node server/scripts/seedEmailTestProposal.js",

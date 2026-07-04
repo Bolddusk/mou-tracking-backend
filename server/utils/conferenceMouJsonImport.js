@@ -2,6 +2,12 @@ const path = require('path');
 const fs = require('fs');
 const { buildConferenceInfo } = require('../constants/conferences');
 const { normalizeCooperationMode } = require('../constants/cooperationModes');
+const {
+  cleanCompanyName,
+  normalizeCompanyPair,
+  buildVentureTitle,
+  buildOutcomeDescription,
+} = require('./mouImportHelpers');
 const { normalizeSectorName, normalizeSifcCategory } = require('./portfolioNormalize');
 
 function parseMouValue(raw) {
@@ -19,29 +25,6 @@ function parseMouValue(raw) {
   return null;
 }
 
-function cleanCompanyName(value) {
-  return String(value || '')
-    .replace(/\n/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildVentureTitle(chineseCompany, pakistaniCompany) {
-  const title = `${chineseCompany} × ${pakistaniCompany}`;
-  return title.length > 250 ? `${title.slice(0, 247)}...` : title;
-}
-
-function buildFullDescription(row) {
-  const parts = [row.outcome_description];
-  if (row.sifc_category) parts.push(`SIFC category: ${row.sifc_category}`);
-  if (row.progress) parts.push(`Progress: ${row.progress}`);
-  if (row.bottleneck) parts.push(`Bottleneck: ${row.bottleneck}`);
-  if (row.tentative_timelines) parts.push(`Tentative timelines: ${row.tentative_timelines}`);
-  if (row.operational_status === 'Inactive') parts.push('Collaboration status: Inactive');
-  if (row.in_execution) parts.push('Collaboration status: In Execution');
-  return parts.filter(Boolean).join('\n\n');
-}
-
 function buildExternalReference(prefix, seq) {
   return `${prefix}-MOU-${String(seq).padStart(3, '0')}`;
 }
@@ -52,8 +35,12 @@ function normalizeConferenceRow(raw, seq, conferenceConfig) {
   const cooperationMode = normalizeCooperationMode(raw['Cooperation Mode'] || raw.cooperation_mode) || 'mou';
   const sector = normalizeSectorName(raw.Sector || raw.sector);
   const sifcCategory = normalizeSifcCategory(raw['SIFC Category'] || raw.sifc_category);
-  const chineseCompany = cleanCompanyName(raw['Chinese company'] || raw.chinese_company);
-  const pakistaniCompany = cleanCompanyName(raw['Pakistani company'] || raw.pakistani_company);
+  const pair = normalizeCompanyPair(
+    raw['Chinese company'] || raw.chinese_company,
+    raw['Pakistani company'] || raw.pakistani_company
+  );
+  const chineseCompany = pair.chinese;
+  const pakistaniCompany = pair.pakistani;
 
   return {
     seq,
@@ -103,7 +90,7 @@ function buildProposalRecord(row, partyAId, sectorLeadId, conferenceConfig) {
   const conferenceInfo = buildConferenceInfo(conferenceShape, {
     description: conferenceConfig.description,
   });
-  const fullDescription = buildFullDescription(row);
+  const fullDescription = buildOutcomeDescription(row);
   const investmentLabel = row.investment_value_usd
     ? `USD ${row.investment_value_usd} million`
     : '';
