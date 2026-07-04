@@ -79,14 +79,14 @@ async function getSectorRowById(id) {
 }
 
 async function listActiveSectors() {
-  await ensureSectorCache();
-  return cachedRows.filter((row) => row.is_active).map((row) => formatSectorRow(row));
+  await refreshSectorCache();
+  return (cachedRows || []).filter((row) => row.is_active).map((row) => formatSectorRow(row));
 }
 
 async function listAllSectorsAdmin() {
-  await ensureSectorCache();
+  await refreshSectorCache();
   const result = [];
-  for (const row of cachedRows) {
+  for (const row of cachedRows || []) {
     const usage = await getSectorUsage(row.name);
     result.push(formatSectorRow(row, usage));
   }

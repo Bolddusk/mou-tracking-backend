@@ -83,7 +83,24 @@ async function deleteAllProposals(connection) {
 }
 
 async function replaceSectors(connection) {
+  if (!(await tableExists(connection, 'sectors'))) {
+    await connection.query(`
+      CREATE TABLE sectors (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Created sectors table');
+  }
+
+  await connection.query('SET FOREIGN_KEY_CHECKS = 0');
   await connection.query('DELETE FROM sectors');
+  await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+
   for (let index = 0; index < SECTORS.length; index += 1) {
     await connection.query('INSERT INTO sectors (name, sort_order, is_active) VALUES (?, ?, 1)', [
       SECTORS[index],
@@ -94,7 +111,24 @@ async function replaceSectors(connection) {
 }
 
 async function replaceSifcCategories(connection) {
+  if (!(await tableExists(connection, 'sifc_categories'))) {
+    await connection.query(`
+      CREATE TABLE sifc_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Created sifc_categories table');
+  }
+
+  await connection.query('SET FOREIGN_KEY_CHECKS = 0');
   await connection.query('DELETE FROM sifc_categories');
+  await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+
   for (let index = 0; index < DEFAULT_SIFC_CATEGORIES.length; index += 1) {
     await connection.query('INSERT INTO sifc_categories (name, sort_order, is_active) VALUES (?, ?, 1)', [
       DEFAULT_SIFC_CATEGORIES[index],
@@ -105,7 +139,33 @@ async function replaceSifcCategories(connection) {
 }
 
 async function replaceConferences(connection) {
+  if (!(await tableExists(connection, 'conferences'))) {
+    await connection.query(`
+      CREATE TABLE conferences (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        conference_key VARCHAR(120) NOT NULL UNIQUE,
+        name VARCHAR(500) NOT NULL,
+        conference_date DATE NULL,
+        conference_end_date DATE NULL,
+        location VARCHAR(255) NULL,
+        host VARCHAR(255) NULL,
+        report_title VARCHAR(500) NULL,
+        engagement_type ENUM('G2G','B2B','B2G','G2B') NULL,
+        description TEXT NULL,
+        supports_report TINYINT(1) NOT NULL DEFAULT 0,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Created conferences table');
+  }
+
+  await connection.query('SET FOREIGN_KEY_CHECKS = 0');
   await connection.query('DELETE FROM conferences');
+  await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+
   for (let index = 0; index < PORTFOLIO_CONFERENCES.length; index += 1) {
     const item = PORTFOLIO_CONFERENCES[index];
     await connection.query(
@@ -261,6 +321,7 @@ async function main() {
     console.log(`Conferences:  ${conferenceCount.cnt} (expected ${PORTFOLIO_CONFERENCES.length})`);
     console.log(`Sector leads: ${slCount.cnt} (expected ${PORTFOLIO_SECTOR_LEADS.length})`);
     console.log(`MOUs:         ${proposalCount.cnt} (expected ${totalImported})`);
+    console.log('\nRestart the API server (or redeploy) so sector/SIFC/conference caches reload.');
     console.log(`\nPassword for all sector leads: ${PASSWORD}`);
     console.log('Example logins:');
     PORTFOLIO_SECTOR_LEADS.slice(0, 3).forEach((entry) => {

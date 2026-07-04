@@ -70,7 +70,7 @@ async function getSifcCategoryRowById(id) {
 }
 
 async function listActiveSifcCategories() {
-  await ensureSifcCategoryCache();
+  await refreshSifcCategoryCache();
   if (!cachedRows) {
     return DEFAULT_SIFC_CATEGORIES.map((name, index) =>
       formatSifcCategoryRow({
@@ -85,7 +85,7 @@ async function listActiveSifcCategories() {
 }
 
 async function listAllSifcCategoriesAdmin() {
-  await ensureSifcCategoryCache();
+  await refreshSifcCategoryCache();
   const result = [];
   for (const row of cachedRows || []) {
     const usage = await getSifcCategoryUsage(row.name);

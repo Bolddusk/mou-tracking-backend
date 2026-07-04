@@ -123,8 +123,29 @@ async function getConferenceRowById(id) {
   return rows[0] || null;
 }
 
+async function getConferenceRowByKey(key) {
+  const normalized = normalizeConferenceKey(key);
+  if (!normalized) return null;
+  const [rows] = await pool.query(`SELECT ${CONFERENCE_SELECT} FROM conferences WHERE conference_key = ?`, [
+    normalized,
+  ]);
+  return rows[0] || null;
+}
+
+async function resolveConferenceRow(id, body = {}) {
+  const byId = await getConferenceRowById(id);
+  if (byId) return byId;
+
+  const key = body.conference_key || body.key;
+  if (key) {
+    return getConferenceRowByKey(key);
+  }
+
+  return null;
+}
+
 async function listActiveConferences() {
-  await ensureConferenceCache();
+  await refreshConferenceCache();
   if (!cachedRows) {
     return KNOWN_CONFERENCES.map((item, index) =>
       formatConferenceRow({
@@ -148,7 +169,7 @@ async function listActiveConferences() {
 }
 
 async function listAllConferencesAdmin() {
-  await ensureConferenceCache();
+  await refreshConferenceCache();
   const result = [];
   for (const row of cachedRows || []) {
     const usage = await getConferenceUsage(row.conference_key);
@@ -246,8 +267,10 @@ async function createConference(body) {
 }
 
 async function updateConference(id, body) {
-  const row = await getConferenceRowById(id);
+  const row = await resolveConferenceRow(id, body);
   if (!row) return { error: 'Conference not found', status: 404 };
+
+  const conferenceId = row.id;
 
   const updates = [];
   const params = [];
@@ -260,7 +283,7 @@ async function updateConference(id, body) {
     if (key !== row.conference_key) {
       const [dup] = await pool.query(
         'SELECT id FROM conferences WHERE conference_key = ? AND id != ?',
-        [key, id]
+        [key, conferenceId]
       );
       if (dup.length) return { error: 'Conference key already exists', status: 409 };
       nextKey = key;
@@ -325,13 +348,13 @@ async function updateConference(id, body) {
 
   if (!updates.length) return { error: 'No fields to update', status: 400 };
 
-  await pool.query(`UPDATE conferences SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
+  await pool.query(`UPDATE conferences SET ${updates.join(', ')} WHERE id = ?`, [...params, conferenceId]);
 
   if (nextKey !== row.conference_key || nextName !== row.name) {
-    const updatedRow = await getConferenceRowById(id);
+    const updatedRow = await getConferenceRowById(conferenceId);
     await cascadeRenameConferenceKey(row.conference_key, nextKey, nextName, updatedRow);
   } else {
-    const updatedRow = await getConferenceRowById(id);
+    const updatedRow = await getConferenceRowById(conferenceId);
     const metadataChanged =
       (body.description !== undefined && (body.description || null) !== (row.description || null)) ||
       (body.engagement_type !== undefined &&
@@ -354,7 +377,7 @@ async function updateConference(id, body) {
   }
 
   await refreshConferenceCache();
-  const updated = await getConferenceRowById(id);
+  const updated = await getConferenceRowById(conferenceId);
   const usage = await getConferenceUsage(updated.conference_key);
   return { conference: formatConferenceRow(updated, usage) };
 }
@@ -391,6 +414,8 @@ module.exports = {
   listActiveConferences,
   listAllConferencesAdmin,
   getConferenceRowById,
+  getConferenceRowByKey,
+  resolveConferenceRow,
   createConference,
   updateConference,
   deleteConference,
