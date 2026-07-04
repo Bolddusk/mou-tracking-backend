@@ -9,6 +9,7 @@
     "db:init": "node server/scripts/initDb.js",
     "db:seed": "node server/scripts/seed.js",
     "db:seed:sector-leads": "node server/scripts/seedSectorLeads.js",
+    "db:seed:portfolio-fresh": "node server/scripts/seedPortfolioFresh.js",
     "db:seed:fresh": "node server/scripts/seedFreshStart.js",
     "db:seed:demo-proposal": "node server/scripts/seedDemoProposal.js",
     "db:seed:email-test-proposal": "node server/scripts/seedEmailTestProposal.js",

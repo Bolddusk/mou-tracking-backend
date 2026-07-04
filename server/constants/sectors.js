@@ -1,14 +1,19 @@
 const SECTORS = [
-  'Agri-chemicals & Inputs',
-  'Agri Technology & Precision Agriculture Solutions',
-  'Food Processing & Value Addition',
+  'Agricultural Engineering & Technology',
+  'Smart Farming Solutions',
+  'Cold Chain System & Agri Logistics',
+  'Agri-trade and Export',
+  'Food Processing and Value Addition',
+  'Fruits & Vegetables Cultivation, Packaging, Processing & Exports',
+  'Seed Production',
+  'Seed Sales',
+  'Pesticide Production',
+  'Fertilizer Production',
+  'Livestock Health',
   'Meat & Poultry Industry',
-  'Dairy Inputs & Processed Dairy Products',
-  'Fruits & Vegetables (Production, Cultivation, Processing, Exports)',
-  'Animal Feed & Related Value Chains',
   'Fisheries & Aquaculture (Including Processing)',
-  'Cold Chain Systems & Agriculture Logistics',
-  'Food Grade Packaging Materials & Equipment',
+  'Dairy Inputs & Dairy Processing',
+  'Agricultural Biotechnology',
 ];
 
 module.exports = { SECTORS };

@@ -1,5 +1,5 @@
-/** Default sector lead for imports / demos (Agri-chemicals & Inputs). */
-const DEFAULT_SECTOR_LEAD_EMAIL = 'agri-chemicals-and-inputs-sectorlead@test.com';
+/** Default sector lead for imports / demos (first portfolio sector). */
+const DEFAULT_SECTOR_LEAD_EMAIL = 'agricultural-engineering-and-technology-sectorlead@test.com';
 
 /** Retired — removed by db:seed:sector-leads */
 const LEGACY_SECTOR_LEAD_EMAIL = 'sectorlead@test.com';

@@ -1,37 +1,50 @@
+const {
+  PORTFOLIO_CONFERENCES,
+} = require('./portfolioSeed');
+
 const PAK_CHINA_SEP_25_CONFERENCE = {
-  key: 'pak-china-sep-25-conference',
-  name: 'Pak China Sep-25 Conference',
-  date: '2025-09-01',
-  end_date: '2025-09-30',
-  location: 'China',
-  host: 'Government of Pakistan',
-  report_title: "Snapshot (PM's China Visit, Sept 25, B2B, MNFSR)",
-  supports_report: true,
+  key: PORTFOLIO_CONFERENCES[0].key,
+  name: PORTFOLIO_CONFERENCES[0].name,
+  date: PORTFOLIO_CONFERENCES[0].date,
+  end_date: PORTFOLIO_CONFERENCES[0].end_date,
+  location: PORTFOLIO_CONFERENCES[0].location,
+  host: PORTFOLIO_CONFERENCES[0].host,
+  report_title: PORTFOLIO_CONFERENCES[0].report_title,
+  supports_report: PORTFOLIO_CONFERENCES[0].supports_report,
+  engagement_type: PORTFOLIO_CONFERENCES[0].engagement_type,
+  description: PORTFOLIO_CONFERENCES[0].description,
+};
+
+const MAY_2026_CHINA_B2B = {
+  key: PORTFOLIO_CONFERENCES[1].key,
+  name: PORTFOLIO_CONFERENCES[1].name,
+  date: PORTFOLIO_CONFERENCES[1].date,
+  end_date: PORTFOLIO_CONFERENCES[1].end_date,
+  location: PORTFOLIO_CONFERENCES[1].location,
+  host: PORTFOLIO_CONFERENCES[1].host,
+  report_title: PORTFOLIO_CONFERENCES[1].report_title,
+  supports_report: PORTFOLIO_CONFERENCES[1].supports_report,
+  engagement_type: PORTFOLIO_CONFERENCES[1].engagement_type,
+  description: PORTFOLIO_CONFERENCES[1].description,
 };
 
 const ISLAMABAD_AGRI_2026 = {
-  key: 'pak-china-islamabad-agri-2026',
-  name: 'PAKISTAN-CHINA Agriculture B2B Investment Conference, Islamabad',
-  date: '2026-06-12',
-  end_date: '2026-06-12',
-  location: 'Islamabad, Pakistan',
-  host: 'Government of Pakistan',
-  report_title: 'Islamabad Agriculture B2B Conference — MOU Snapshot',
-  supports_report: true,
+  key: PORTFOLIO_CONFERENCES[2].key,
+  name: PORTFOLIO_CONFERENCES[2].name,
+  date: PORTFOLIO_CONFERENCES[2].date,
+  end_date: PORTFOLIO_CONFERENCES[2].end_date,
+  location: PORTFOLIO_CONFERENCES[2].location,
+  host: PORTFOLIO_CONFERENCES[2].host,
+  report_title: PORTFOLIO_CONFERENCES[2].report_title,
+  supports_report: PORTFOLIO_CONFERENCES[2].supports_report,
+  engagement_type: PORTFOLIO_CONFERENCES[2].engagement_type,
+  description: PORTFOLIO_CONFERENCES[2].description,
 };
 
-const HANGZHOU_AGRI_2026 = {
-  key: 'pak-china-hangzhou-agri-2026',
-  name: 'PAKISTAN-CHINA ICT&BESS and Agriculture B2B Investment Conference, Hangzhou',
-  date: '2026-06-15',
-  end_date: '2026-06-15',
-  location: 'Hangzhou, China',
-  host: 'Government of Pakistan',
-  report_title: 'Hangzhou Agriculture B2B Conference — MOU Snapshot',
-  supports_report: true,
-};
+/** @deprecated Use MAY_2026_CHINA_B2B — kept for legacy import scripts */
+const HANGZHOU_AGRI_2026 = MAY_2026_CHINA_B2B;
 
-const KNOWN_CONFERENCES = [HANGZHOU_AGRI_2026, ISLAMABAD_AGRI_2026, PAK_CHINA_SEP_25_CONFERENCE];
+const KNOWN_CONFERENCES = [PAK_CHINA_SEP_25_CONFERENCE, MAY_2026_CHINA_B2B, ISLAMABAD_AGRI_2026];
 
 function getConferenceByKey(key) {
   const { getConferenceFromCacheByKey } = require('../utils/conferenceRegistry');
@@ -67,6 +80,7 @@ function buildConferenceInfo(conference, overrides = {}) {
 
 module.exports = {
   HANGZHOU_AGRI_2026,
+  MAY_2026_CHINA_B2B,
   ISLAMABAD_AGRI_2026,
   PAK_CHINA_SEP_25_CONFERENCE,
   KNOWN_CONFERENCES,

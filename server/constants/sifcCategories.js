@@ -1,10 +1,13 @@
-/** Default SIFC category labels for migration seed (admin-managed in DB after migrate). */
+/** Canonical SIFC category labels (admin-managed in DB after migrate). */
 const DEFAULT_SIFC_CATEGORIES = [
-  'Investment – Export Oriented',
-  'Investment – Import Reduction',
-  'Trade – Export',
-  'Trade – Import (Services)',
-  'Training',
+  'Bilteral',
+  'Investment Export Oriented',
+  'Import Consumption',
+  'Import Reduction Investment',
+  'Investment Import Reduction',
+  'Investment Others',
+  'Trade Export',
+  'Trade Import (Service)',
 ];
 
 module.exports = { DEFAULT_SIFC_CATEGORIES };
