@@ -1,6 +1,5 @@
 const { normalizeCooperationMode, COOPERATION_MODES } = require('../constants/cooperationModes');
 const { getActiveSectorNames } = require('./sectorRegistry');
-const { sectorLeadCoversSector } = require('./sectorLeadAssignments');
 const {
   isValidActiveConferenceKey,
   getConferenceFromCacheByKey,
@@ -61,7 +60,13 @@ const EXECUTIVE_SUMMARY_KEYS = [
   'source_seq',
 ];
 
-const ADMIN_ONLY_SCALAR_FIELDS = new Set(['external_reference']);
+const ADMIN_ONLY_SCALAR_FIELDS = new Set(['external_reference', 'sector']);
+
+const SECTOR_CHANGE_ROLES = new Set(['super_admin', 'admin']);
+
+function canChangeProposalSector(user) {
+  return SECTOR_CHANGE_ROLES.has(user?.role);
+}
 
 const READ_ONLY_SYSTEM_FIELDS = new Set([
   'id',
@@ -126,6 +131,10 @@ function applyConferenceKeyUpdate(updates, conferenceKey) {
 }
 
 function buildProposalFieldUpdates(body, existingRow, user) {
+  if (body.sector !== undefined && !canChangeProposalSector(user)) {
+    return { error: 'Only admin and super admin can change sector', status: 403 };
+  }
+
   const sanitizedBody = { ...body };
   if (sanitizedBody.party_a_info !== undefined) {
     sanitizedBody.party_a_info = stripExcludedPartyAInfo(sanitizedBody.party_a_info);
@@ -199,9 +208,6 @@ function buildProposalFieldUpdates(body, existingRow, user) {
     if (!active.includes(sector)) {
       return { error: 'Invalid sector', status: 400 };
     }
-    if (user?.role === 'sector_lead' && !sectorLeadCoversSector(user, sector)) {
-      return { error: 'Sector lead cannot assign proposal outside assigned sectors', status: 403 };
-    }
     updates.sector = sector;
   }
 
@@ -274,7 +280,9 @@ function getEditableFieldCatalog() {
 module.exports = {
   buildProposalFieldUpdates,
   getEditableFieldCatalog,
+  canChangeProposalSector,
   EXECUTIVE_SUMMARY_KEYS,
   READ_ONLY_SYSTEM_FIELDS,
   EXCLUDED_PARTY_A_INFO_KEYS,
+  ADMIN_ONLY_SCALAR_FIELDS,
 };

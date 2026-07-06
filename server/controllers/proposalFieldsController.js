@@ -13,6 +13,7 @@ const { ensureSifcCategoryCache, listActiveSifcCategories } = require('../utils/
 const {
   buildProposalFieldUpdates,
   getEditableFieldCatalog,
+  canChangeProposalSector,
 } = require('../utils/proposalFieldEdit');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const { provisionPartyAForProposal } = require('../utils/partyAProvisioner');
@@ -45,13 +46,16 @@ async function getProposalEditableFields(req, res) {
       listActiveSifcCategories(),
     ]);
 
+    const canChangeSector = canChangeProposalSector(req.user);
+
     return res.json({
       proposal_id: Number(req.params.id),
       editable: edit.ok,
       locked: Boolean(edit.locked),
       reason: edit.ok ? null : edit.error,
       catalog,
-      sectors: edit.ok ? getActiveSectorNames() : [],
+      can_change_sector: canChangeSector,
+      sectors: edit.ok && canChangeSector ? getActiveSectorNames() : [],
       conferences: edit.ok ? conferences : [],
       sifc_categories: edit.ok ? sifcCategories : [],
     });
