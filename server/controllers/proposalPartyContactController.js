@@ -9,6 +9,9 @@ const { attachPokeStatus } = require('../utils/pokeStatus');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const { provisionPartyAForProposal } = require('../utils/partyAProvisioner');
 const { sectorLeadHasAnySector } = require('../utils/sectorLeadAssignments');
+const { logProposalUpdates } = require('../utils/proposalChangeLog');
+const { normalizeEmail } = require('../utils/emailNormalize');
+const { buildPartyBContactUpdates } = require('../utils/partyBInfo');
 
 const PARTY_A_INFO_FIELDS = [
   'entity_type',
@@ -20,14 +23,6 @@ const PARTY_A_INFO_FIELDS = [
   'phone',
   'country',
   'city',
-];
-
-const PARTY_B_FIELDS = [
-  'party_b_name',
-  'party_b_organization',
-  'party_b_email',
-  'party_b_phone',
-  'party_b_country',
 ];
 
 function parsePartyAInfo(raw) {
@@ -80,8 +75,12 @@ function buildPartyContactUpdates(body, existingProposal) {
   if (body.party_a_info && typeof body.party_a_info === 'object') {
     PARTY_A_INFO_FIELDS.forEach((key) => {
       if (body.party_a_info[key] !== undefined) {
-        nextPartyAInfo[key] =
+        let value =
           body.party_a_info[key] === null ? '' : String(body.party_a_info[key]).trim();
+        if (key === 'email' && value) {
+          value = normalizeEmail(value);
+        }
+        nextPartyAInfo[key] = value;
       }
     });
     updates.party_a_info = JSON.stringify(nextPartyAInfo);
@@ -91,13 +90,15 @@ function buildPartyContactUpdates(body, existingProposal) {
     }
   }
 
-  PARTY_B_FIELDS.forEach((key) => {
-    if (body[key] !== undefined) {
-      updates[key] = body[key] === null ? null : String(body[key]).trim();
-    }
-  });
+  const partyBResult = buildPartyBContactUpdates(body, existingProposal);
+  if (partyBResult) {
+    Object.assign(updates, partyBResult.updates);
+  }
 
-  if (body.party_b_email !== undefined && body.party_b_email && !isValidEmail(body.party_b_email)) {
+  const partyBEmail =
+    partyBResult?.nextInfo?.email ||
+    (body.party_b_email !== undefined ? normalizeEmail(body.party_b_email) : null);
+  if (partyBEmail && !isValidEmail(partyBEmail)) {
     return { error: 'Invalid Party B email address', status: 400 };
   }
 
@@ -109,7 +110,7 @@ function buildPartyContactUpdates(body, existingProposal) {
     return { error: 'Invalid Party A email address', status: 400 };
   }
 
-  return { updates, nextPartyAInfo };
+  return { updates, nextPartyAInfo, nextPartyBInfo: partyBResult?.nextInfo || null };
 }
 
 async function getProposalRow(proposalId) {
@@ -143,6 +144,14 @@ async function updateProposalPartyContacts(req, res) {
       req.params.id,
     ]);
 
+    await logProposalUpdates({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'party_contacts_updated',
+      beforeRow: proposal,
+      updates,
+    });
+
     let partyAResult = null;
     let partyBResult = null;
     const updatedProposal = await getProposalRow(req.params.id);
@@ -152,7 +161,10 @@ async function updateProposalPartyContacts(req, res) {
       partyAResult = await provisionPartyAForProposal(updatedProposal);
     }
 
-    if (updates.party_b_email && provisionableStatuses.includes(updatedProposal.status)) {
+    if (
+      (updates.party_b_info || updates.party_b_email) &&
+      provisionableStatuses.includes(updatedProposal.status)
+    ) {
       partyBResult = await provisionPartyBForProposal(updatedProposal);
     }
 

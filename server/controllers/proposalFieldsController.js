@@ -20,6 +20,7 @@ const {
   loadPartyAProfileSnapshot,
   loadPartyBProfileSnapshot,
 } = require('../utils/partyProfileSnapshots');
+const { logProposalUpdates } = require('../utils/proposalChangeLog');
 
 async function getProposalRow(proposalId) {
   const [rows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [proposalId]);
@@ -93,6 +94,14 @@ async function updateProposalFields(req, res) {
       ...Object.values(updates),
       req.params.id,
     ]);
+
+    await logProposalUpdates({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'fields_updated',
+      beforeRow: proposal,
+      updates,
+    });
 
     const updated = await getProposalRow(req.params.id);
     const provisionableStatuses = ['approved', 'submitted', 'resubmitted', 'completed'];

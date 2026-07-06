@@ -11,6 +11,7 @@ const {
   canCloseProposalDeal,
   canCloseMatchDeal,
 } = require('../utils/dealClose');
+const { logProposalAction } = require('../utils/proposalChangeLog');
 
 const PROPOSAL_SELECT = `
   SELECT p.*,
@@ -83,6 +84,16 @@ async function closeProposalDeal(req, res) {
        WHERE id = ?`,
       [req.user.id, req.params.id]
     );
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'deal_closed',
+      changes: [
+        { field: 'status', old_value: proposal.status, new_value: 'completed' },
+        { field: 'mou_status', old_value: proposal.mou_status, new_value: 'deal_closed' },
+      ],
+    });
 
     const updated = await getProposalRow(req.params.id);
     const access = await checkProposalAccess(req, updated);

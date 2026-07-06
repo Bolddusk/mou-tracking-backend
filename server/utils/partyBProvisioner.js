@@ -7,6 +7,7 @@ const {
   buildCredentialsPayload,
   setTemporaryPassword,
 } = require('./partyBCredentials');
+const { buildPartyBInfoFromRow } = require('./partyBInfo');
 
 async function findUserByEmail(email) {
   const [rows] = await pool.query('SELECT id, email, role FROM users WHERE email = ?', [
@@ -27,14 +28,16 @@ async function provisionPartyBForProposal(proposal) {
     credentials: null,
   };
 
-  const email = proposal.party_b_email?.trim().toLowerCase();
+  const partyBInfo = buildPartyBInfoFromRow(proposal);
+  const email = partyBInfo.email?.trim().toLowerCase();
   if (!email) {
     result.skipped = true;
     result.reason = 'missing_party_b_email';
     return result;
   }
 
-  if (!proposal.party_b_name?.trim()) {
+  const contactName = partyBInfo.contact_name?.trim();
+  if (!contactName) {
     result.skipped = true;
     result.reason = 'missing_party_b_name';
     return result;
@@ -60,11 +63,11 @@ async function provisionPartyBForProposal(proposal) {
       `INSERT INTO users (full_name, email, password, role, organization, phone, must_change_password)
        VALUES (?, ?, ?, 'party_b', ?, ?, 1)`,
       [
-        proposal.party_b_name.trim(),
+        contactName,
         email,
         hashedPassword,
-        proposal.party_b_organization?.trim() || null,
-        proposal.party_b_phone?.trim() || null,
+        partyBInfo.organization_name?.trim() || null,
+        partyBInfo.phone?.trim() || null,
       ]
     );
 
@@ -86,7 +89,7 @@ async function provisionPartyBForProposal(proposal) {
 
     try {
       await sendPartyBInviteEmail({
-        partyBName: proposal.party_b_name.trim(),
+        partyBName: contactName,
         proposalTitle:
           proposal.venture_name ||
           proposal.company_name ||

@@ -49,6 +49,8 @@ Content-Type: application/json
 
 Send only fields you want to update. All fields optional.
 
+**Recommended (symmetric Party A + Party B):**
+
 ```json
 {
   "party_a_info": {
@@ -62,6 +64,25 @@ Send only fields you want to update. All fields optional.
     "country": "Pakistan",
     "city": "Lahore"
   },
+  "party_b_info": {
+    "entity_type": "business",
+    "organization_name": "Famsun Group Co., Ltd.",
+    "department_ministry": "",
+    "contact_name": "Chen Zhenjun",
+    "designation": "Director",
+    "email": "chen.zhenjun@famsun.com",
+    "phone": "+86-138-0000-1234",
+    "country": "China",
+    "city": "Changzhou"
+  }
+}
+```
+
+**Legacy (still supported):** flat Party B fields
+
+```json
+{
+  "party_a_info": { "...": "..." },
   "party_b_name": "Chen Zhenjun",
   "party_b_organization": "Famsun Group Co., Ltd.",
   "party_b_email": "chen.zhenjun@famsun.com",
@@ -86,15 +107,34 @@ Send only fields you want to update. All fields optional.
 
 Also updates `company_name` on proposal when `organization_name` is sent.
 
-### Party B fields (top-level)
+### Party B fields (`party_b_info`) — same shape as Party A
 
 | Field | Label in UI |
 |-------|-------------|
-| `party_b_name` | Full name / signatory |
-| `party_b_organization` | Organization |
-| `party_b_email` | Email |
-| `party_b_phone` | Phone |
-| `party_b_country` | Country |
+| `entity_type` | Entity type (`business` / `government`) |
+| `organization_name` | Organization |
+| `department_ministry` | Department / Ministry |
+| `contact_name` | Contact name |
+| `designation` | Designation |
+| `email` | Email (stored lowercase — login email) |
+| `phone` | Phone |
+| `country` | Country |
+| `city` | City |
+
+Also updates `venture_name` when `organization_name` is sent.
+
+Backend keeps legacy flat columns (`party_b_name`, `party_b_email`, …) in sync for reports and older clients.
+
+### Legacy Party B fields (top-level, still accepted)
+
+| Field | Maps to `party_b_info` |
+|-------|------------------------|
+| `party_b_name` | `contact_name` |
+| `party_b_organization` | `organization_name` |
+| `party_b_email` | `email` |
+| `party_b_phone` | `phone` |
+| `party_b_country` | `country` |
+| `party_b_entity_type` | `entity_type` |
 
 ---
 
@@ -109,6 +149,13 @@ Also updates `company_name` on proposal when `organization_name` is sent.
       "contact_name": "Shahid Nazir",
       "email": "shahid@greencorp.pk",
       "organization_name": "Green Corporate Initiative"
+    },
+    "party_b_info": {
+      "contact_name": "Chen Zhenjun",
+      "email": "chen.zhenjun@famsun.com",
+      "organization_name": "Famsun Group Co., Ltd.",
+      "designation": "Director",
+      "city": "Changzhou"
     },
     "party_b_name": "Chen Zhenjun",
     "party_b_email": "chen.zhenjun@famsun.com",
@@ -135,7 +182,7 @@ Also updates `company_name` on proposal when `organization_name` is sent.
 
 ### Auto Party B account linking
 
-When **`party_b_email`** is saved and proposal status is `approved` (or submitted/resubmitted/completed):
+When **`party_b_info.email`** (or legacy `party_b_email`) is saved and proposal status is `approved` (or submitted/resubmitted/completed):
 
 - Backend auto-creates or links a **`party_b`** user account (same as approve flow)
 - Response may include `party_b.credentials` if email is not configured
@@ -220,11 +267,17 @@ async function savePartyContacts(proposalId: number, form: PartyContactForm) {
       entity_type: form.partyA.entityType,
       department_ministry: form.partyA.department,
     },
-    party_b_name: form.partyB.name,
-    party_b_organization: form.partyB.organization,
-    party_b_email: form.partyB.email,
-    party_b_phone: form.partyB.phone,
-    party_b_country: form.partyB.country,
+    party_b_info: {
+      organization_name: form.partyB.organization,
+      contact_name: form.partyB.contactName,
+      designation: form.partyB.designation,
+      email: form.partyB.email,
+      phone: form.partyB.phone,
+      country: form.partyB.country,
+      city: form.partyB.city,
+      entity_type: form.partyB.entityType,
+      department_ministry: form.partyB.department,
+    },
   });
 
   setProposal(res.data.proposal);

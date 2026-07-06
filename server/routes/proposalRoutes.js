@@ -33,6 +33,16 @@ const {
   getProposalEditableFields,
   updateProposalFields,
 } = require('../controllers/proposalFieldsController');
+const {
+  getProposalChangeLogs,
+  getChangeLogMouOptions,
+  getChangeLogFilterOptions,
+  getRecentChangeLogs,
+  getSectorChangeLogs,
+  getMyChangeLogs,
+  exportChangeLogsReport,
+  exportProposalChangeLogs,
+} = require('../controllers/proposalChangeLogController');
 
 const router = express.Router();
 
@@ -46,6 +56,24 @@ const allProposalsList = [
   verifyToken,
   requireRole('super_admin'),
   requireAnyPermission('proposals.list_all'),
+];
+const changeLogMouOptionsRoles = [verifyToken, requireRole('super_admin', 'admin')];
+const changeLogFilterOptionsRoles = [
+  verifyToken,
+  requireRole('super_admin', 'admin', 'sector_lead'),
+];
+const changeLogExportRoles = [
+  verifyToken,
+  requireAnyPermission('proposals.view', 'proposals.view_own', 'proposals.list_sector', 'proposals.export'),
+];
+const sectorChangeLogsRoles = [
+  verifyToken,
+  requireRole('sector_lead'),
+  requireAnyPermission('proposals.view', 'proposals.list_sector'),
+];
+const myChangeLogsRoles = [
+  verifyToken,
+  requireAnyPermission('proposals.view', 'proposals.view_detail', 'proposals.view_own'),
 ];
 const reviewerListRoles = [
   verifyToken,
@@ -103,6 +131,14 @@ router.get('/filter-options', ...reviewerListRoles, getProposalFilterOptions);
 router.get('/conference-report', ...conferenceReportRoles, getConferenceReport);
 router.get('/all', ...allProposalsList, getAllProposals);
 
+// Change logs — before /:id
+router.get('/change-logs/filter-options', ...changeLogFilterOptionsRoles, getChangeLogFilterOptions);
+router.get('/change-logs/export', ...changeLogExportRoles, exportChangeLogsReport);
+router.get('/change-logs/recent', ...changeLogMouOptionsRoles, getRecentChangeLogs);
+router.get('/change-logs/sector', ...sectorChangeLogsRoles, getSectorChangeLogs);
+router.get('/change-logs/mou-options', ...changeLogMouOptionsRoles, getChangeLogMouOptions);
+router.get('/change-logs/mine', ...myChangeLogsRoles, getMyChangeLogs);
+
 // Activities (before /:id)
 router.post('/:proposalId/activities', ...activitiesCreateRoles, createActivity);
 router.get('/:proposalId/activities', ...activitiesViewRoles, getProposalActivities);
@@ -115,6 +151,8 @@ router.patch('/:id/reject', ...rejectProposalRoles, rejectProposal);
 router.patch('/:id/party-contacts', ...editContactsRoles, updateProposalPartyContacts);
 router.get('/:id/editable-fields', ...proposalViewRoles, getProposalEditableFields);
 router.patch('/:id/fields', ...proposalViewRoles, updateProposalFields);
+router.get('/:id/change-logs/export', ...proposalViewRoles, exportProposalChangeLogs);
+router.get('/:id/change-logs', ...proposalViewRoles, getProposalChangeLogs);
 
 // Export report — before /:id
 router.get('/:id/export-report', ...exportReportRoles, exportProposalReport);

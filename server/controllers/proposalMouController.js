@@ -15,6 +15,7 @@ const {
 } = require('../utils/mouFileVersions');
 const { isProposalLocked, PROPOSAL_LOCKED_ERROR } = require('../utils/dealClose');
 const { getMatchForEngagement } = require('../utils/proposalAccess');
+const { logProposalUpdates, logProposalAction } = require('../utils/proposalChangeLog');
 
 const MOU_FIELDS = ['mou_scope', 'mou_description', 'mou_sector', 'mou_demand', 'mou_file_url'];
 const MOU_STATUSES = new Set(['not_started', 'in_progress', 'uploaded', 'signed', 'deal_closed']);
@@ -190,6 +191,25 @@ async function saveProposalMou(req, res) {
     }
 
     const updated = await getProposalRow(req.params.id);
+
+    const mouDiff = {};
+    [...MOU_FIELDS, 'mou_status', 'mou_file_url'].forEach((key) => {
+      const oldVal = proposal[key];
+      const newVal = updated[key];
+      if (String(oldVal ?? '') !== String(newVal ?? '')) {
+        mouDiff[key] = newVal;
+      }
+    });
+    if (Object.keys(mouDiff).length) {
+      await logProposalUpdates({
+        proposalId: req.params.id,
+        user: req.user,
+        action: mouFile ? 'mou_file_uploaded' : 'mou_updated',
+        beforeRow: proposal,
+        updates: mouDiff,
+      });
+    }
+
     return res.json({
       message: fileUploadResult?.message || 'MOU saved successfully',
       ...(fileUploadResult || {}),
@@ -361,6 +381,23 @@ async function acknowledgeProposalMou(req, res) {
       await pool.query(`UPDATE proposals SET mou_status = 'signed' WHERE id = ?`, [req.params.id]);
       updated.mou_status = 'signed';
     }
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'mou_acknowledged',
+      changes: [
+        {
+          field: req.user.role === 'party_a' ? 'mou_ack_by_a' : 'mou_ack_by_b',
+          old_value: 'No',
+          new_value: 'Yes',
+        },
+        ...(nextStatus === 'signed'
+          ? [{ field: 'mou_status', old_value: proposal.mou_status, new_value: 'signed' }]
+          : []),
+      ],
+      summary: `MOU acknowledged by ${req.user.role === 'party_a' ? 'Pakistani side' : 'Chinese side'}`,
+    });
 
     const enrichedUpdated = enrichProposalRow(updated);
     const status = await buildMouStatusWithVersions(updated, enrichedUpdated.mou_file_url, {

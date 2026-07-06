@@ -2,6 +2,18 @@ const {
   MOU_LIFECYCLE_LABELS,
   resolveMouLifecycle,
 } = require('./mouLifecycle');
+const { normalizeEmail } = require('./emailNormalize');
+const {
+  buildPartyAContactsDisplay,
+  buildPartyBContactsDisplay,
+} = require('./partyContactsDisplay');
+const {
+  EMPTY_PARTY_B_INFO,
+  buildPartyBInfoFromRow,
+  syncFlatColumnsFromPartyBInfo,
+  mergePartyBInfoPatch,
+  applyLegacyPartyBFlatPatch,
+} = require('./partyBInfo');
 
 const FINANCIAL_METRICS = [
   { key: 'total_revenue', label: 'Total Revenue', category: 'Income Statement', unit: 'PKR Mn' },
@@ -26,6 +38,7 @@ const ENTITY_TYPES = ['government', 'business'];
 const JSON_FIELDS = [
   'conference_info',
   'party_a_info',
+  'party_b_info',
   'executive_summary',
   'company_overview',
   'project_overview',
@@ -202,6 +215,11 @@ function enrichProposalRow(row) {
 
   const conference_info = parseJsonField(row.conference_info, EMPTY_CONFERENCE_INFO);
   const party_a_info = parseJsonField(row.party_a_info, EMPTY_PARTY_A_INFO);
+  if (party_a_info.email) {
+    party_a_info.email = normalizeEmail(party_a_info.email);
+  }
+  const party_b_info = buildPartyBInfoFromRow(row);
+  const partyBFlat = syncFlatColumnsFromPartyBInfo(party_b_info);
   const executive_summary = parseJsonField(row.executive_summary, EMPTY_EXECUTIVE_SUMMARY);
   const company_overview = parseJsonField(row.company_overview, EMPTY_COMPANY_OVERVIEW);
   const project_overview = parseJsonField(row.project_overview, EMPTY_PROJECT_OVERVIEW);
@@ -220,10 +238,13 @@ function enrichProposalRow(row) {
     executive_summary,
   });
 
-  return {
+  const enriched = {
     ...row,
+    ...partyBFlat,
+    party_b_email: partyBFlat.party_b_email,
     conference_info,
     party_a_info,
+    party_b_info,
     executive_summary,
     company_overview,
     project_overview,
@@ -233,9 +254,20 @@ function enrichProposalRow(row) {
     display_title,
     proposal_title: display_title,
     pakistani_company: row.company_name || party_a_info.organization_name || null,
-    chinese_company: row.party_b_name || row.party_b_organization || null,
+    chinese_company:
+      party_b_info.organization_name ||
+      party_b_info.contact_name ||
+      row.party_b_name ||
+      row.party_b_organization ||
+      null,
     mou_lifecycle,
     mou_lifecycle_label: MOU_LIFECYCLE_LABELS[mou_lifecycle] || mou_lifecycle,
+  };
+
+  return {
+    ...enriched,
+    party_a_contacts_display: buildPartyAContactsDisplay(enriched),
+    party_b_contacts_display: buildPartyBContactsDisplay(enriched),
   };
 }
 
@@ -265,14 +297,37 @@ function buildDraftUpdates(body) {
 
   for (const field of SCALAR_DRAFT_FIELDS) {
     if (body[field] !== undefined) {
-      updates[field] = body[field];
+      updates[field] =
+        field === 'party_b_email' && body[field]
+          ? normalizeEmail(body[field])
+          : body[field];
     }
   }
 
   for (const field of JSON_FIELDS) {
     if (body[field] !== undefined) {
-      updates[field] = body[field];
+      let value = body[field];
+      if (field === 'party_a_info' && value && typeof value === 'object' && !Array.isArray(value)) {
+        value = { ...value };
+        if (value.email !== undefined && value.email !== null && String(value.email).trim()) {
+          value.email = normalizeEmail(value.email);
+        }
+      }
+      if (field === 'party_b_info' && value && typeof value === 'object' && !Array.isArray(value)) {
+        value = mergePartyBInfoPatch(EMPTY_PARTY_B_INFO, value);
+      }
+      updates[field] = value;
     }
+  }
+
+  const hasPartyBFlat = SCALAR_DRAFT_FIELDS.filter((f) => f.startsWith('party_b_')).some(
+    (f) => body[f] !== undefined
+  );
+  if (body.party_b_info !== undefined || hasPartyBFlat) {
+    let info = mergePartyBInfoPatch(EMPTY_PARTY_B_INFO, body.party_b_info || {});
+    info = applyLegacyPartyBFlatPatch(info, body);
+    updates.party_b_info = info;
+    Object.assign(updates, syncFlatColumnsFromPartyBInfo(info));
   }
 
   const engagementType = sanitizeEnumField(updates.engagement_type, ENGAGEMENT_TYPES);
@@ -716,6 +771,7 @@ module.exports = {
   SCALAR_DRAFT_FIELDS,
   EMPTY_CONFERENCE_INFO,
   EMPTY_PARTY_A_INFO,
+  EMPTY_PARTY_B_INFO,
   EMPTY_EXECUTIVE_SUMMARY,
   EMPTY_COMPANY_OVERVIEW,
   EMPTY_PROJECT_OVERVIEW,

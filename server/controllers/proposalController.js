@@ -8,6 +8,7 @@ const {
   validateSubmit,
   hasMeaningfulProposalDraft,
 } = require('../utils/proposalTemplate');
+const { logProposalUpdates, logProposalAction, recordProposalChangeLog } = require('../utils/proposalChangeLog');
 
 async function getOwnedProposal(proposalId, user) {
   const [rows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [proposalId]);
@@ -41,6 +42,13 @@ async function saveDraft(req, res) {
             ...Object.values(updates),
             proposalId,
           ]);
+          await logProposalUpdates({
+            proposalId,
+            user: req.user,
+            action: 'draft_saved',
+            beforeRow: existing,
+            updates,
+          });
         }
 
         const [rows] = await pool.query('SELECT status FROM proposals WHERE id = ?', [proposalId]);
@@ -64,6 +72,14 @@ async function saveDraft(req, res) {
       `INSERT INTO proposals (${cols.join(', ')}) VALUES (${placeholders})`,
       values
     );
+
+    await recordProposalChangeLog({
+      proposalId: result.insertId,
+      user: req.user,
+      action: 'created',
+      changes: [],
+      summary: 'Proposal created as draft',
+    });
 
     return res.status(201).json({
       proposal_id: result.insertId,
@@ -105,6 +121,13 @@ async function submitProposal(req, res) {
       `UPDATE proposals SET status = 'submitted', submitted_at = NOW() WHERE id = ?`,
       [proposalId]
     );
+
+    await logProposalAction({
+      proposalId,
+      user: req.user,
+      action: 'submitted',
+      changes: [{ field: 'status', old_value: 'draft', new_value: 'submitted' }],
+    });
 
     return res.json({
       proposal_id: Number(proposalId),
@@ -149,6 +172,13 @@ async function resubmitProposal(req, res) {
        WHERE id = ?`,
       [req.params.id]
     );
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'resubmitted',
+      changes: [{ field: 'status', old_value: proposal.status, new_value: 'resubmitted' }],
+    });
 
     const [rows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [req.params.id]);
     const updated = enrichProposalRow(rows[0]);

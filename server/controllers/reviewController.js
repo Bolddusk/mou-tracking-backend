@@ -29,6 +29,7 @@ const {
   loadPartyAProfileSnapshot,
   loadPartyBProfileSnapshot,
 } = require('../utils/partyProfileSnapshots');
+const { logProposalAction } = require('../utils/proposalChangeLog');
 
 const PROPOSAL_SELECT = `
   SELECT
@@ -261,6 +262,18 @@ async function approveProposal(req, res) {
       [comment || null, req.user.id, req.params.id]
     );
 
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'approved',
+      changes: [
+        { field: 'status', old_value: proposal.status, new_value: 'approved' },
+        ...(comment
+          ? [{ field: 'sector_lead_comment', old_value: proposal.sector_lead_comment, new_value: comment }]
+          : []),
+      ],
+    });
+
     const approved = await getProposalById(req.params.id);
     const partyBResult = await provisionPartyBForProposal(approved);
     const updated = await getProposalById(req.params.id);
@@ -314,6 +327,16 @@ async function rejectProposal(req, res) {
        WHERE id = ?`,
       [comment.trim(), req.user.id, req.params.id]
     );
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'rejected',
+      changes: [
+        { field: 'status', old_value: proposal.status, new_value: 'rejected' },
+        { field: 'sector_lead_comment', old_value: proposal.sector_lead_comment, new_value: comment.trim() },
+      ],
+    });
 
     const updated = await getProposalById(req.params.id);
     return res.json(updated);
