@@ -54,6 +54,11 @@ async function checkProposalAccess(req, proposal) {
     return { error: 'Proposal not found', status: 404 };
   }
 
+  const { isProposalArchived, canArchiveProposals } = require('./proposalSoftDelete');
+  if (isProposalArchived(proposal) && !canArchiveProposals(req.user)) {
+    return { error: 'Proposal not found', status: 404 };
+  }
+
   if (['super_admin', 'admin'].includes(req.user.role)) {
     return { ok: true, proposal };
   }
@@ -127,6 +132,11 @@ function canEditProposalFields(req, proposal, access) {
       error: 'Deal is closed — fields cannot be edited',
       status: 400,
     };
+  }
+
+  const { isProposalArchived } = require('./proposalSoftDelete');
+  if (isProposalArchived(proposal)) {
+    return { ok: false, error: 'Archived MOUs cannot be edited', status: 400 };
   }
 
   if (proposal.status === 'draft') {
@@ -233,6 +243,19 @@ function isProposalOwnerForActivities(req, proposal) {
   return false;
 }
 
+function canEditMouTextFields(req, proposal) {
+  const role = req.user.role;
+  if (['super_admin', 'admin'].includes(role)) return true;
+  if (role === 'party_a' && proposal.party_a_id === req.user.id) return true;
+  if (role === 'party_b' && proposal.party_b_user_id === req.user.id) return true;
+  return false;
+}
+
+function applyMouFieldCapabilities(req, proposal, caps) {
+  caps.can_edit_mou_fields = canEditMouTextFields(req, proposal);
+  return caps;
+}
+
 function isHistoricExemptProposal(proposal) {
   return Boolean(proposal?.mou_ack_exempt);
 }
@@ -250,6 +273,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     can_send_chat: false,
     can_add_activity: false,
     can_upload_mou: false,
+    can_edit_mou_fields: false,
     can_view_mou: false,
     can_close_deal: false,
     can_edit_party_contacts: false,
@@ -290,7 +314,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_add_activity = approvedAndOpen;
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
-    return caps;
+    return applyMouFieldCapabilities(req, proposal, caps);
   }
 
   if (role === 'party_b' && proposal.party_b_user_id === req.user.id) {
@@ -298,7 +322,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_send_chat = ready && !locked;
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
-    return caps;
+    return applyMouFieldCapabilities(req, proposal, caps);
   }
 
   if (role === 'investor' && proposal.party_b_user_id === req.user.id) {
@@ -322,7 +346,22 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_close_deal =
       canCloseProposalDeal(req, proposal) && permissionMatchesGrant('proposals.deal_close', perms);
     caps.can_edit_party_contacts = permissionMatchesGrant('proposals.edit_contacts', perms);
-    return caps;
+    return applyMouFieldCapabilities(req, proposal, caps);
+  }
+
+  if (role === 'admin') {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_add_activity = approvedAndOpen;
+    caps.can_upload_mou = approvedAndOpen;
+    caps.can_view_mou = mouVisible;
+    caps.can_close_deal = canCloseProposalDeal(req, proposal);
+    caps.can_edit_party_contacts = proposal.status !== 'draft';
+    if (reviewable) {
+      caps.can_approve = permissionMatchesGrant('proposals.approve', perms);
+      caps.can_reject = permissionMatchesGrant('proposals.reject', perms);
+    }
+    return applyMouFieldCapabilities(req, proposal, caps);
   }
 
   if (role === 'super_admin') {
@@ -337,7 +376,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
       caps.can_approve = true;
       caps.can_reject = true;
     }
-    return caps;
+    return applyMouFieldCapabilities(req, proposal, caps);
   }
 
   if (['regional_focal_point', 'focal_point'].includes(role) && access.readOnly && mouVisible) {
@@ -355,6 +394,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
 module.exports = {
   checkProposalAccess,
   canEditProposalFields,
+  canEditMouTextFields,
   checkApprovedPartyChatAccess,
   isProposalOwnerForActivities,
   hasRfpApprovedMatchAccess,

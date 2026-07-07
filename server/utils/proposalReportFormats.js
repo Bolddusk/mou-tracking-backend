@@ -54,17 +54,16 @@ async function reportToXlsx(report) {
     summarySheet.addRow({ field, value: value ?? '' });
   }
 
-  const activitySheet = workbook.addWorksheet('Activity Updates');
+  const activitySheet = workbook.addWorksheet('Progress Updates');
   activitySheet.columns = [
-    { header: 'Activity Date', key: 'activity_date', width: 14 },
+    { header: 'Progress Date', key: 'progress_date', width: 14 },
     { header: 'Title', key: 'title', width: 28 },
     { header: 'Description', key: 'description', width: 40 },
     { header: 'Status', key: 'status', width: 12 },
     { header: 'Added By', key: 'added_by_name', width: 20 },
     { header: 'Added By Role', key: 'added_by_role', width: 14 },
+    { header: 'Source', key: 'source', width: 14 },
     { header: 'Comments', key: 'comments', width: 48 },
-    { header: 'Approvals', key: 'approvals', width: 40 },
-    { header: 'Poke Response', key: 'poke_response', width: 36 },
     { header: 'Support File URL', key: 'support_file_url', width: 36 },
   ];
   activitySheet.getRow(1).font = { bold: true };
@@ -76,18 +75,21 @@ async function reportToXlsx(report) {
   activitySheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
 
   for (const activity of report.updates) {
-    activitySheet.addRow({
-      activity_date: activity.activity_date,
+    const excelRow = activitySheet.addRow({
+      progress_date: activity.activity_date,
       title: activity.title,
       description: activity.description,
-      status: activity.status,
+      status:
+        activity.status === 'recorded' || activity.status === 'approved'
+          ? 'Recorded'
+          : activity.status,
       added_by_name: activity.added_by_name,
       added_by_role: activity.added_by_role,
+      source: activity.source === 'mou_field_sync' ? 'MOU fields' : 'Manual entry',
       comments: formatCommentsForCsv(activity.comments),
-      approvals: formatApprovalsForCsv(activity.approvals),
-      poke_response: formatPokeResponseForCsv(activity.poke_response),
       support_file_url: activity.support_file_url || '',
     });
+    excelRow.getCell('comments').alignment = { wrapText: true, vertical: 'top' };
   }
 
   activitySheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -149,11 +151,11 @@ function reportToPdf(report) {
     ]);
 
     doc.addPage();
-    doc.fontSize(13).fillColor('#0f766e').text('Activity Updates (date-wise)', { underline: true });
+    doc.fontSize(13).fillColor('#0f766e').text('Progress Updates (date-wise)', { underline: true });
     doc.moveDown(0.5);
 
     if (!report.updates.length) {
-      doc.fontSize(10).fillColor('#64748b').text('No activity updates recorded.');
+      doc.fontSize(10).fillColor('#64748b').text('No progress updates recorded.');
     }
 
     for (const activity of report.updates) {

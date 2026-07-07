@@ -22,6 +22,7 @@ const {
   loadPartyBProfileSnapshot,
 } = require('../utils/partyProfileSnapshots');
 const { logProposalUpdates } = require('../utils/proposalChangeLog');
+const { recordProgressFromFieldUpdates } = require('../utils/progressActivity');
 
 async function getProposalRow(proposalId) {
   const [rows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [proposalId]);
@@ -107,6 +108,13 @@ async function updateProposalFields(req, res) {
       updates,
     });
 
+    const progressSync = await recordProgressFromFieldUpdates({
+      proposalId: req.params.id,
+      user: req.user,
+      beforeRow: proposal,
+      updates,
+    });
+
     const updated = await getProposalRow(req.params.id);
     const provisionableStatuses = ['approved', 'submitted', 'resubmitted', 'completed'];
 
@@ -142,6 +150,7 @@ async function updateProposalFields(req, res) {
       party_a: partyAResult,
       party_b: partyBResult,
       updated_fields: Object.keys(updates),
+      progress_sync: progressSync,
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {

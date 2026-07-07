@@ -17,15 +17,19 @@ const {
   getProposalDetail,
   approveProposal,
   rejectProposal,
+  archiveProposal,
+  restoreProposal,
 } = require('../controllers/reviewController');
 const {
   createActivity,
   getProposalActivities,
+  exportProposalProgress,
   pokeForUpdate,
 } = require('../controllers/activityController');
 const { getProposalChatMessages } = require('../controllers/proposalChatController');
 const { exportProposalReport } = require('../controllers/proposalReportController');
 const { getConferenceReport } = require('../controllers/conferenceReportController');
+const { getProposalSifcReport } = require('../controllers/proposalSifcReportController');
 const { getProposalMou, saveProposalMou, getProposalMouStatus, acknowledgeProposalMou, getProposalMouVersions } = require('../controllers/proposalMouController');
 const { closeProposalDeal } = require('../controllers/dealCloseController');
 const { updateProposalPartyContacts } = require('../controllers/proposalPartyContactController');
@@ -86,6 +90,7 @@ const reviewerListRoles = [
 ];
 const approveProposalRoles = [verifyToken, requireAnyPermission('proposals.approve')];
 const rejectProposalRoles = [verifyToken, requireAnyPermission('proposals.reject')];
+const archiveProposalRoles = [verifyToken, requireRole('super_admin', 'admin')];
 const exportReportRoles = [verifyToken, requireAnyPermission('proposals.export')];
 const conferenceReportRoles = [
   verifyToken,
@@ -105,12 +110,12 @@ const activityRoles = [
 ];
 const mouViewRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'regional_focal_point'),
+  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'admin', 'regional_focal_point'),
 ];
 const mouAckRoles = [verifyToken, requireRole('party_a', 'party_b', 'investor')];
 const mouStatusViewRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin'),
+  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'admin'),
 ];
 
 const partyAResubmit = [verifyToken, requireRole('party_a')];
@@ -142,12 +147,16 @@ router.get('/change-logs/mine', ...myChangeLogsRoles, getMyChangeLogs);
 // Activities (before /:id)
 router.post('/:proposalId/activities', ...activitiesCreateRoles, createActivity);
 router.get('/:proposalId/activities', ...activitiesViewRoles, getProposalActivities);
+router.get('/:proposalId/progress/export', ...activitiesViewRoles, exportProposalProgress);
+router.get('/:id/progress/export', ...activitiesViewRoles, exportProposalProgress);
 router.get('/:proposalId/messages', ...messagesViewRoles, getProposalChatMessages);
 router.post('/:proposalId/poke', ...approveProposalRoles, pokeForUpdate);
 
 // Proposal review
 router.patch('/:id/approve', ...approveProposalRoles, approveProposal);
 router.patch('/:id/reject', ...rejectProposalRoles, rejectProposal);
+router.patch('/:id/archive', ...archiveProposalRoles, archiveProposal);
+router.patch('/:id/restore', ...archiveProposalRoles, restoreProposal);
 router.patch('/:id/party-contacts', ...editContactsRoles, updateProposalPartyContacts);
 router.get('/:id/editable-fields', ...proposalViewRoles, getProposalEditableFields);
 router.patch('/:id/fields', ...proposalViewRoles, updateProposalFields);
@@ -155,9 +164,10 @@ router.get('/:id/change-logs/export', ...proposalViewRoles, exportProposalChange
 router.get('/:id/change-logs', ...proposalViewRoles, getProposalChangeLogs);
 
 // Export report — before /:id
+router.get('/:id/sifc-report', ...conferenceReportRoles, getProposalSifcReport);
 router.get('/:id/export-report', ...exportReportRoles, exportProposalReport);
 
-const mouUploadRoles = [verifyToken, requireRole('party_a', 'party_b', 'sector_lead', 'super_admin')];
+const mouUploadRoles = [verifyToken, requireRole('party_a', 'party_b', 'sector_lead', 'super_admin', 'admin')];
 const dealCloseRoles = [verifyToken, requireAnyPermission('proposals.deal_close')];
 
 // Direct opportunity MOU (Party A fills all — legacy proposals table)

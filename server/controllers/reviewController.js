@@ -1,5 +1,7 @@
 const pool = require('../config/db');
 const { checkProposalAccess, buildProposalCapabilities } = require('../utils/proposalAccess');
+const { canChangeProposalSector } = require('../utils/proposalFieldEdit');
+const { canArchiveProposals, isProposalArchived } = require('../utils/proposalSoftDelete');
 const { loadUserPermissions } = require('../utils/rolePermissions');
 const { attachPokeStatus } = require('../utils/pokeStatus');
 const { enrichProposals, enrichProposalRow } = require('../utils/proposalTemplate');
@@ -37,10 +39,12 @@ const PROPOSAL_SELECT = `
     pa.full_name AS party_a_name,
     pa.email AS party_a_email,
     pa.organization AS party_a_organization,
-    rv.full_name AS reviewed_by_name
+    rv.full_name AS reviewed_by_name,
+    del.full_name AS deleted_by_name
   FROM proposals p
   JOIN users pa ON pa.id = p.party_a_id
   LEFT JOIN users rv ON rv.id = p.reviewed_by
+  LEFT JOIN users del ON del.id = p.deleted_by
 `;
 
 async function getProposalById(proposalId) {
@@ -67,7 +71,11 @@ async function fetchPaginatedProposalList(req, res, options = {}) {
   }
 
   const { page, limit, offset } = parsePagination(req.query);
-  const { sql, params } = buildProposalListWhere(req.query, { sectorScopes, sectorScope: options.sectorScope });
+  const { sql, params } = buildProposalListWhere(req.query, {
+    sectorScopes,
+    sectorScope: options.sectorScope,
+    allowIncludeDeleted: options.allowIncludeDeleted,
+  });
 
   const countQuery = `SELECT COUNT(*) AS total ${PROPOSAL_LIST_FROM_SQL}${sql}`;
   const [[countRow]] = await pool.query(countQuery, params);
@@ -113,7 +121,7 @@ async function getSectorLeadProposals(req, res) {
 
 async function getAllProposals(req, res) {
   try {
-    return fetchPaginatedProposalList(req, res);
+    return fetchPaginatedProposalList(req, res, { allowIncludeDeleted: true });
   } catch (err) {
     console.error('All proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
@@ -207,9 +215,17 @@ async function getProposalDetail(req, res) {
       loadPartyBProfileSnapshot(req.user, proposal.party_b_user_id, proposal),
     ]);
     const userPermissions = await loadUserPermissions(req.user);
+    const capabilities = {
+      ...buildProposalCapabilities(req, proposal, access, userPermissions),
+      can_change_sector: canChangeProposalSector(req.user) && !isProposalArchived(proposal),
+      can_archive_proposal:
+        canArchiveProposals(req.user) && !isProposalArchived(proposal) && proposal.status !== 'draft',
+      can_restore_proposal: canArchiveProposals(req.user) && isProposalArchived(proposal),
+    };
     return res.json({
       ...withPoke,
-      capabilities: buildProposalCapabilities(req, proposal, access, userPermissions),
+      capabilities,
+      is_archived: isProposalArchived(proposal),
       party_a_profile: partyAProfile,
       party_b_profile: partyBProfile,
     });
@@ -346,6 +362,88 @@ async function rejectProposal(req, res) {
   }
 }
 
+async function archiveProposal(req, res) {
+  try {
+    if (!canArchiveProposals(req.user)) {
+      return res.status(403).json({ error: 'Only super admin and admin can archive MOUs' });
+    }
+
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    if (isProposalArchived(proposal)) {
+      return res.status(400).json({ error: 'MOU is already archived' });
+    }
+
+    const reason = req.body?.reason ? String(req.body.reason).trim() : null;
+
+    await pool.query(
+      `UPDATE proposals SET deleted_at = NOW(), deleted_by = ?, delete_reason = ? WHERE id = ?`,
+      [req.user.id, reason, req.params.id]
+    );
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'archived',
+      changes: [{ field: 'deleted_at', old_value: null, new_value: new Date().toISOString() }],
+      summary: reason ? `MOU archived — ${reason}` : 'MOU archived',
+    });
+
+    const updated = await getProposalById(req.params.id);
+    return res.json({
+      message: 'MOU archived successfully',
+      proposal: enrichProposalRow(updated),
+      is_archived: true,
+    });
+  } catch (err) {
+    console.error('Archive proposal error:', err.message);
+    return res.status(500).json({ error: 'Failed to archive MOU' });
+  }
+}
+
+async function restoreProposal(req, res) {
+  try {
+    if (!canArchiveProposals(req.user)) {
+      return res.status(403).json({ error: 'Only super admin and admin can restore MOUs' });
+    }
+
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    if (!isProposalArchived(proposal)) {
+      return res.status(400).json({ error: 'MOU is not archived' });
+    }
+
+    await pool.query(
+      `UPDATE proposals SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL WHERE id = ?`,
+      [req.params.id]
+    );
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'restored',
+      changes: [{ field: 'deleted_at', old_value: proposal.deleted_at, new_value: null }],
+      summary: 'MOU restored from archive',
+    });
+
+    const updated = await getProposalById(req.params.id);
+    return res.json({
+      message: 'MOU restored successfully',
+      proposal: enrichProposalRow(updated),
+      is_archived: false,
+    });
+  } catch (err) {
+    console.error('Restore proposal error:', err.message);
+    return res.status(500).json({ error: 'Failed to restore MOU' });
+  }
+}
+
 module.exports = {
   getSectorLeadProposals,
   getAllProposals,
@@ -353,4 +451,6 @@ module.exports = {
   getProposalDetail,
   approveProposal,
   rejectProposal,
+  archiveProposal,
+  restoreProposal,
 };

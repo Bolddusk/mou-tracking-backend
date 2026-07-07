@@ -138,12 +138,19 @@ function mergeBuckets(target, source) {
   target.amount_usd_m = round2(target.amount_usd_m + source.amount_usd_m);
 }
 
-function buildValueLabel(valueUsd, parsed, rawSifc) {
+function buildValueLabel(valueUsd, parsed, rawSifc, location) {
   const label = parsed.sub_category || rawSifc || '';
+  let valuePart;
   if (!valueUsd) {
-    return label ? `Undisclosed (${label})` : 'Undisclosed';
+    valuePart = label ? `Undisclosed (${label})` : 'Undisclosed';
+  } else {
+    valuePart = label ? `${valueUsd} (${label})` : String(valueUsd);
   }
-  return label ? `${valueUsd} (${label})` : String(valueUsd);
+
+  const loc = location && String(location).trim() && String(location).trim() !== '—'
+    ? String(location).trim()
+    : '';
+  return loc ? `${valuePart} / ${loc}` : valuePart;
 }
 
 function extractOutcome(proposal) {
@@ -166,7 +173,12 @@ function buildDetailRow(proposal, sr, bucket) {
     pak_company: displayText(proposal.company_name || partyA.organization_name),
     chinese_company: displayText(proposal.party_b_name),
     mou_value_usd_m: hasNumericValue ? valueUsd : null,
-    value_label: buildValueLabel(hasNumericValue ? valueUsd : 0, parsed, exec.sifc_category),
+    value_label: buildValueLabel(
+      hasNumericValue ? valueUsd : 0,
+      parsed,
+      exec.sifc_category,
+      exec.location
+    ),
     location: displayText(exec.location),
     tentative_timeline: displayTimeline(exec.tentative_timeline),
     status_feedback: formatMultiline(exec.progress),
@@ -325,7 +337,8 @@ async function fetchConferenceProposals(conferenceKey, sectorScopes = null) {
   const params = [conferenceKey];
   let sql = `${PROPOSAL_SELECT}
     WHERE p.conference_key = ?
-      AND p.status != 'draft'`;
+      AND p.status != 'draft'
+      AND p.deleted_at IS NULL`;
 
   if (sectorScopes?.length) {
     sql += ` AND p.sector IN (${sectorScopes.map(() => '?').join(', ')})`;
@@ -338,17 +351,35 @@ async function fetchConferenceProposals(conferenceKey, sectorScopes = null) {
   return rows.map((row) => enrichProposalRow(row));
 }
 
-async function buildConferenceReport(conference, { sectorScopes = null, scope = {} } = {}) {
-  const proposals = await fetchConferenceProposals(conference.key, sectorScopes);
+async function fetchProposalForSifcReport(proposalId) {
+  const [rows] = await pool.query(`${PROPOSAL_SELECT} WHERE p.id = ?`, [proposalId]);
+  if (!rows.length) return null;
+  return enrichProposalRow(rows[0]);
+}
+
+function buildReportFromProposals(proposals, conferenceMeta, scope = {}) {
   const sections = buildSections(proposals);
+  const singleMou = proposals.length === 1;
+  const proposal = singleMou ? proposals[0] : null;
 
   return {
-    conference: {
-      key: conference.key,
-      name: conference.name,
-      report_title: conference.report_title || conference.name,
-    },
+    conference: conferenceMeta,
     scope,
+    single_mou: singleMou,
+    proposal: proposal
+      ? {
+          id: proposal.id,
+          title: proposal.proposal_title || proposal.company_name || null,
+          pak_company: proposal.company_name || proposal.party_a_info?.organization_name || null,
+          chinese_company: proposal.party_b_name || null,
+          sector: proposal.sector || null,
+          status: proposal.status || null,
+          cooperation_mode: proposal.cooperation_mode || null,
+          sifc_category: proposal.executive_summary?.sifc_category || null,
+          mou_operational_status: proposal.executive_summary?.mou_operational_status || null,
+          conference_key: proposal.conference_key || null,
+        }
+      : null,
     generated_at: new Date().toISOString(),
     proposal_count: proposals.length,
     summary_counts: {
@@ -363,9 +394,31 @@ async function buildConferenceReport(conference, { sectorScopes = null, scope = 
   };
 }
 
+async function buildProposalSifcReport(proposal, conference = null) {
+  const { buildSingleMouSifcReport } = require('./singleMouSifcReport');
+  return buildSingleMouSifcReport(proposal, conference);
+}
+
+async function buildConferenceReport(conference, { sectorScopes = null, scope = {} } = {}) {
+  const proposals = await fetchConferenceProposals(conference.key, sectorScopes);
+
+  return buildReportFromProposals(
+    proposals,
+    {
+      key: conference.key,
+      name: conference.name,
+      report_title: conference.report_title || conference.name,
+    },
+    scope
+  );
+}
+
 module.exports = {
   buildConferenceReport,
+  buildProposalSifcReport,
+  buildReportFromProposals,
   fetchConferenceProposals,
+  fetchProposalForSifcReport,
   parseSifcCategory,
   getOperationalBucket,
   parseUsdM,

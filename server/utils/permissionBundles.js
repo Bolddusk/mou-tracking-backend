@@ -25,7 +25,8 @@ const NAV_PERMISSION_BUNDLES = [
     actions: [
       { permission: 'proposals.approve', label: 'Approve proposal', apis: [{ method: 'PATCH', path: '/api/proposals/:id/approve' }] },
       { permission: 'proposals.reject', label: 'Reject proposal', apis: [{ method: 'PATCH', path: '/api/proposals/:id/reject' }] },
-      { permission: 'proposals.export', label: 'Export report', apis: [{ method: 'GET', path: '/api/proposals/:id/export-report' }] },
+      { permission: 'proposals.archive', label: 'Archive MOU', apis: [{ method: 'PATCH', path: '/api/proposals/:id/archive' }, { method: 'PATCH', path: '/api/proposals/:id/restore' }] },
+      { permission: 'proposals.export', label: 'Export report', apis: [{ method: 'GET', path: '/api/proposals/:id/export-report' }, { method: 'GET', path: '/api/proposals/:id/sifc-report' }] },
       { permission: 'proposals.edit_contacts', label: 'Edit party contacts', apis: [{ method: 'PATCH', path: '/api/proposals/:id/party-contacts' }] },
       { permission: 'proposals.deal_close', label: 'Close deal', apis: [{ method: 'PATCH', path: '/api/proposals/:id/close-deal' }] },
       { permission: 'proposals.activities.create', label: 'Add activity', apis: [{ method: 'POST', path: '/api/proposals/:proposalId/activities' }] },

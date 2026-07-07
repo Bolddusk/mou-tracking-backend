@@ -3,6 +3,7 @@ const { getPublicFileUrl } = require('../middleware/upload');
 const {
   checkProposalAccess,
   buildProposalCapabilities,
+  canEditMouTextFields,
 } = require('../utils/proposalAccess');
 const { enrichProposalRow } = require('../utils/proposalTemplate');
 const { formatMouAckStatus, resolveSignedStatus, isMouAckExempt } = require('../utils/mouAcknowledgment');
@@ -16,8 +17,10 @@ const {
 const { isProposalLocked, PROPOSAL_LOCKED_ERROR } = require('../utils/dealClose');
 const { getMatchForEngagement } = require('../utils/proposalAccess');
 const { logProposalUpdates, logProposalAction } = require('../utils/proposalChangeLog');
+const { loadUserPermissions } = require('../utils/rolePermissions');
 
 const MOU_FIELDS = ['mou_scope', 'mou_description', 'mou_sector', 'mou_demand', 'mou_file_url'];
+const MOU_TEXT_FIELDS = ['mou_scope', 'mou_description', 'mou_sector', 'mou_demand'];
 const MOU_STATUSES = new Set(['not_started', 'in_progress', 'uploaded', 'signed', 'deal_closed']);
 
 const PROPOSAL_SELECT = `
@@ -44,7 +47,7 @@ function resolveMouStatus(proposal) {
   return 'not_started';
 }
 
-function formatMouResponse(proposal) {
+function formatMouResponse(proposal, capabilities = null) {
   const enriched = enrichProposalRow(proposal);
   return {
     proposal_id: Number(proposal.id),
@@ -57,6 +60,13 @@ function formatMouResponse(proposal) {
       mou_demand: enriched.mou_demand,
       mou_file_url: enriched.mou_file_url,
     },
+    capabilities: capabilities
+      ? {
+          can_view_mou: capabilities.can_view_mou,
+          can_upload_mou: capabilities.can_upload_mou,
+          can_edit_mou_fields: capabilities.can_edit_mou_fields,
+        }
+      : undefined,
   };
 }
 
@@ -68,12 +78,12 @@ async function getProposalMou(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const caps = buildProposalCapabilities(req, proposal, access);
+    const caps = buildProposalCapabilities(req, proposal, access, await loadUserPermissions(req.user));
     if (!caps.can_view_mou) {
       return res.status(403).json({ error: 'MOU is not available for this opportunity' });
     }
 
-    return res.json(formatMouResponse(proposal));
+    return res.json(formatMouResponse(proposal, caps));
   } catch (err) {
     console.error('Get proposal MOU error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch MOU' });
@@ -92,7 +102,7 @@ async function saveProposalMou(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const caps = buildProposalCapabilities(req, proposal, access);
+    const caps = buildProposalCapabilities(req, proposal, access, await loadUserPermissions(req.user));
     if (!caps.can_upload_mou) {
       return res.status(403).json({ error: 'You cannot update MOU on this opportunity' });
     }
@@ -101,13 +111,36 @@ async function saveProposalMou(req, res) {
       return res.status(400).json({ error: PROPOSAL_LOCKED_ERROR });
     }
 
+    const canEditTextFields = canEditMouTextFields(req, proposal);
     const mouFile = req.files?.mou_file?.[0];
+    const enrichedBefore = enrichProposalRow(proposal);
+
+    const attemptedTextChanges =
+      !canEditTextFields &&
+      MOU_TEXT_FIELDS.some((key) => {
+        if (req.body[key] === undefined) return false;
+        const nextValue = String(req.body[key] ?? '').trim();
+        const currentValue = String(enrichedBefore[key] ?? '').trim();
+        return nextValue !== currentValue;
+      });
+    const attemptedStatusChange =
+      !canEditTextFields && req.body.mou_status !== undefined && !mouFile;
+
+    if (attemptedTextChanges || attemptedStatusChange) {
+      return res.status(403).json({
+        error:
+          'Sector Lead can only upload MOU document here — scope, sector, description, and demand cannot be changed',
+      });
+    }
+
     const updates = {};
-    MOU_FIELDS.forEach((key) => {
-      if (req.body[key] !== undefined && key !== 'mou_file_url') {
-        updates[key] = req.body[key];
-      }
-    });
+    if (canEditTextFields) {
+      MOU_FIELDS.forEach((key) => {
+        if (req.body[key] !== undefined && key !== 'mou_file_url') {
+          updates[key] = req.body[key];
+        }
+      });
+    }
 
     if (Object.keys(updates).length === 0 && !mouFile && !req.body.mou_status) {
       return res.status(400).json({ error: 'No MOU fields or file provided' });
@@ -213,7 +246,7 @@ async function saveProposalMou(req, res) {
     return res.json({
       message: fileUploadResult?.message || 'MOU saved successfully',
       ...(fileUploadResult || {}),
-      ...formatMouResponse(updated),
+      ...formatMouResponse(updated, caps),
       proposal: enrichProposalRow(updated),
     });
   } catch (err) {

@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { enrichProposalRow } = require('./proposalTemplate');
+const { formatCommentsForReport } = require('./progressActivity');
 
 const PROPOSAL_SELECT = `
   SELECT
@@ -67,6 +68,7 @@ async function getActivitiesForReport(proposalId) {
     title: activity.title,
     description: activity.description || '',
     status: activity.status,
+    source: activity.source || 'manual',
     added_by_name: activity.added_by_name,
     added_by_role: activity.added_by_role,
     support_file_url: activity.support_file_url || null,
@@ -219,13 +221,7 @@ function csvEscape(value) {
 }
 
 function formatCommentsForCsv(comments) {
-  if (!comments?.length) return '';
-  return comments
-    .map((c) => {
-      const date = c.created_at ? new Date(c.created_at).toISOString().slice(0, 10) : '';
-      return `${c.author_name} (${c.author_role}) [${date}]: ${c.text}`;
-    })
-    .join(' | ');
+  return formatCommentsForReport(comments);
 }
 
 function formatApprovalsForCsv(approvals) {

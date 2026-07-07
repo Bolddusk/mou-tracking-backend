@@ -231,7 +231,7 @@ async function conferenceReportToXlsx(report) {
     { header: 'Sr', key: 'sr', width: 6 },
     { header: 'Pak. company', key: 'pak_company', width: 28 },
     { header: 'Chinese company', key: 'chinese_company', width: 28 },
-    { header: 'MoU Value (USD M)', key: 'mou_value_usd_m', width: 16 },
+    { header: 'MoU Value (USD M) / location', key: 'mou_value_usd_m', width: 20 },
     { header: 'Outcome', key: 'outcome', width: 30 },
     { header: 'Status/Feedback', key: 'status_feedback', width: 40, wrap: true },
     { header: 'Action Taken', key: 'action_taken', width: 22 },
@@ -242,7 +242,7 @@ async function conferenceReportToXlsx(report) {
     { header: 'Sr', key: 'sr', width: 6 },
     { header: 'Pak. company', key: 'pak_company', width: 28 },
     { header: 'Chinese company', key: 'chinese_company', width: 28 },
-    { header: 'MoU Value (USD M)', key: 'mou_value_usd_m', width: 16 },
+    { header: 'MoU Value (USD M) / location', key: 'mou_value_usd_m', width: 20 },
     { header: 'Product', key: 'product', width: 30 },
     { header: 'Status/Feedback', key: 'status_feedback', width: 40, wrap: true },
     { header: 'Bottlenecks', key: 'bottlenecks', width: 18 },
@@ -369,4 +369,5 @@ module.exports = {
   conferenceReportToXlsx,
   conferenceReportToPdf,
   reportDownloadBasename,
+  launchPdfBrowser,
 };

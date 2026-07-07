@@ -4,6 +4,7 @@ const {
 } = require('../constants/cooperationModes');
 const { getActiveSectorNames } = require('./sectorRegistry');
 const { getActiveSifcCategoryNames } = require('./sifcCategoryRegistry');
+const { buildNotArchivedSql } = require('./proposalSoftDelete');
 const {
   MOU_LIFECYCLE_FILTERS,
   buildMouLifecycleWhere,
@@ -78,6 +79,13 @@ function buildProposalListWhere(query, options = {}) {
       : options.sectorScope
         ? [options.sectorScope]
         : null;
+
+  const includeDeleted = query.include_deleted === '1' || query.include_deleted === 'true';
+  if (!includeDeleted || !options.allowIncludeDeleted) {
+    conditions.push(buildNotArchivedSql('p'));
+  } else if (query.archived_only === '1' || query.archived_only === 'true') {
+    conditions.push('p.deleted_at IS NOT NULL');
+  }
 
   if (scopedSectors?.length) {
     conditions.push(`p.sector IN (${scopedSectors.map(() => '?').join(', ')})`);
@@ -177,6 +185,8 @@ function buildListFiltersEcho(query, options = {}) {
     q: query.q || null,
     date_from: query.date_from || null,
     date_to: query.date_to || null,
+    include_deleted: query.include_deleted === '1' || query.include_deleted === 'true' || null,
+    archived_only: query.archived_only === '1' || query.archived_only === 'true' || null,
   };
 }
 

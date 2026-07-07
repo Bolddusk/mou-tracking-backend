@@ -65,6 +65,18 @@ GET /api/proposals/conference-report?conference_key=pak-china-sep-25-conference&
 
 ---
 
+## Single MOU SIFC report
+
+Proposal detail page se ek MOU ka SIFC report:
+
+```
+GET /api/proposals/:id/sifc-report?format=json|xlsx|pdf
+```
+
+See **`PROPOSAL_SIFC_REPORT_FRONTEND.md`** for UI wiring.
+
+---
+
 ## Filter options
 
 `GET /api/proposals/filter-options` → `conferences[].supports_report`
