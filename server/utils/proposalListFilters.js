@@ -80,11 +80,25 @@ function buildProposalListWhere(query, options = {}) {
         ? [options.sectorScope]
         : null;
 
-  const includeDeleted = query.include_deleted === '1' || query.include_deleted === 'true';
-  if (!includeDeleted || !options.allowIncludeDeleted) {
-    conditions.push(buildNotArchivedSql('p'));
-  } else if (query.archived_only === '1' || query.archived_only === 'true') {
+  const archiveFilter = String(query.archive_filter || query.archive || '').trim().toLowerCase();
+  const archivedOnly =
+    query.archived_only === '1' ||
+    query.archived_only === 'true' ||
+    archiveFilter === 'archived_only' ||
+    archiveFilter === 'archived';
+  const includeDeleted =
+    query.include_deleted === '1' ||
+    query.include_deleted === 'true' ||
+    archiveFilter === 'include_archived' ||
+    archiveFilter === 'all';
+  const canUseArchiveFilters = Boolean(options.allowIncludeDeleted);
+
+  if (archivedOnly && canUseArchiveFilters) {
     conditions.push('p.deleted_at IS NOT NULL');
+  } else if (includeDeleted && canUseArchiveFilters) {
+    // Active + archived — no deleted_at filter
+  } else {
+    conditions.push(buildNotArchivedSql('p'));
   }
 
   if (scopedSectors?.length) {

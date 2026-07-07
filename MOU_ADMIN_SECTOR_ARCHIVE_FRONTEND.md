@@ -78,12 +78,22 @@ PATCH /api/proposals/:id/restore
 
 ### List behaviour
 
+| UI filter | API query |
+|-----------|-----------|
+| Active only (default) | *(no param)* |
+| Include archived | `?include_deleted=1` |
+| **Archived only** | `?archived_only=1` or `?archive_filter=archived_only` |
+
+**Note:** `archived_only=1` works alone — `include_deleted` not required.
+
 | Endpoint | Archived MOUs |
 |----------|----------------|
 | `GET /api/proposals/all` | Hidden by default |
 | `GET /api/proposals/all?include_deleted=1` | SA/Admin sees active + archived |
 | `GET /api/proposals/all?archived_only=1` | SA/Admin — archived only |
 | `GET /api/proposals/sector-lead` | Never shows archived |
+
+**Important:** Table column **MOU STATUS** (`Active` / `Inactive`) = operational status — **not** archive. Archived MOUs can still show `Active` there. Use `is_archived` / `deleted_at` for archive badge.
 
 ### Access after archive
 

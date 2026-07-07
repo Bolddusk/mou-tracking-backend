@@ -262,6 +262,7 @@ function enrichProposalRow(row) {
       null,
     mou_lifecycle,
     mou_lifecycle_label: MOU_LIFECYCLE_LABELS[mou_lifecycle] || mou_lifecycle,
+    is_archived: Boolean(row.deleted_at),
   };
 
   return {
