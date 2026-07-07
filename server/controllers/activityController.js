@@ -9,7 +9,11 @@ const {
   mapActivityToProgress,
   resolveProgressCapabilities,
   isAdminRole,
+  filterProgressTabActivities,
   syncProgressEntryToProposal,
+  syncManualProgressToProposal,
+  normalizeProgressDescriptionInput,
+  normalizeProgressActivityDateInput,
 } = require('../utils/progressActivity');
 const {
   progressRowsToCsv,
@@ -124,7 +128,8 @@ function parseSyncedFields(raw) {
 }
 
 function buildProgressListPayload(activities, user) {
-  const progressUpdates = activities.map((activity) => mapActivityToProgress(activity, user));
+  const visibleActivities = filterProgressTabActivities(activities);
+  const progressUpdates = visibleActivities.map((activity) => mapActivityToProgress(activity, user));
   const progressRows = progressUpdates.map((item) => item.sheet_row);
 
   return {
@@ -195,10 +200,19 @@ async function createActivity(req, res) {
       return res.status(400).json({ error: PROPOSAL_LOCKED_ERROR });
     }
 
-    const { activity_date, title, description, support_file_url, comment } = req.body;
+    const activity_date = normalizeProgressActivityDateInput(req.body);
+    const title = req.body.title;
+    const description = normalizeProgressDescriptionInput(req.body);
+    const { support_file_url, comment } = req.body;
 
     if (!activity_date || !title?.trim()) {
       return res.status(400).json({ error: 'activity_date and title are required' });
+    }
+
+    if (!description) {
+      return res.status(400).json({
+        error: 'description is required (send as description or what_was_done)',
+      });
     }
 
     const [result] = await pool.query(
@@ -211,7 +225,7 @@ async function createActivity(req, res) {
         req.user.role,
         activity_date,
         title.trim(),
-        description || null,
+        description,
         support_file_url || null,
         PROGRESS_RECORDED_STATUS,
       ]
@@ -228,7 +242,18 @@ async function createActivity(req, res) {
     }
 
     const activity = await getActivityWithRelations(activityId);
-    return res.status(201).json(mapActivityToProgress(activity, req.user));
+    const mouSync = await syncManualProgressToProposal(proposal, {
+      description,
+      activityDate: activity_date,
+      createdAt: activity.created_at,
+    });
+
+    const payload = mapActivityToProgress(activity, req.user);
+    if (mouSync) {
+      payload.mou_fields_synced = mouSync.applied_fields;
+      payload.mou_fields = mouSync.mou_fields;
+    }
+    return res.status(201).json(payload);
   } catch (err) {
     console.error('Create activity error:', err.message);
     return res.status(500).json({ error: 'Failed to create activity' });
@@ -348,12 +373,16 @@ async function updateProgressEntry(req, res) {
 
     const { activity_date, title, description, support_file_url, mou_field_values, sync_to_mou_fields } =
       req.body;
+    const normalizedDescription =
+      description !== undefined ? normalizeProgressDescriptionInput(req.body) : undefined;
+    const normalizedActivityDate =
+      activity_date !== undefined ? normalizeProgressActivityDateInput(req.body) : undefined;
     const updates = [];
     const values = [];
 
     if (activity_date !== undefined) {
       updates.push('activity_date = ?');
-      values.push(activity_date);
+      values.push(normalizedActivityDate);
     }
     if (title !== undefined) {
       const nextTitle = String(title).trim();
@@ -365,7 +394,7 @@ async function updateProgressEntry(req, res) {
     }
     if (description !== undefined) {
       updates.push('description = ?');
-      values.push(description || null);
+      values.push(normalizedDescription || null);
     }
     if (support_file_url !== undefined) {
       updates.push('support_file_url = ?');
@@ -379,14 +408,22 @@ async function updateProgressEntry(req, res) {
     values.push(req.params.activityId);
     await pool.query(`UPDATE proposal_activities SET ${updates.join(', ')} WHERE id = ?`, values);
 
+    const updated = await getActivityWithRelations(req.params.activityId);
     const proposal = check.proposal || (await getProposalById(activity.proposal_id));
-    const mouSync = await syncProgressEntryToProposal(proposal, activity, {
-      description,
+    let mouSync = await syncProgressEntryToProposal(proposal, activity, {
+      description: normalizedDescription,
       mou_field_values,
       sync_to_mou_fields,
     });
 
-    const updated = await getActivityWithRelations(req.params.activityId);
+    if (!mouSync && activity.source === 'manual' && normalizedDescription !== undefined) {
+      mouSync = await syncManualProgressToProposal(proposal, {
+        description: normalizedDescription,
+        activityDate: normalizedActivityDate ?? updated.activity_date,
+        createdAt: updated.created_at,
+      });
+    }
+
     return res.json({
       ...mapActivityToProgress(updated, req.user),
       mou_sync: mouSync,

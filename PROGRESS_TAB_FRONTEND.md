@@ -12,7 +12,7 @@
 |--------|-------|
 | Tab label **Activities** | Tab label **Progress** |
 | Manual entry → `pending` → SL approves | Auto **Recorded** — no approval |
-| MOU field edits separate | Progress fields on MOU → auto row in Progress tab |
+| MOU field edits separate | Only **Progress** field on MOU → auto row in Progress tab |
 | Card/timeline UI | **Table** (Excel-like) + download |
 | Approve / Reject buttons | **Remove** |
 
@@ -78,6 +78,7 @@ Same URL for backward compatibility — response shape expanded.
   "approval_required": false,
   "sheet_columns": [
     { "key": "progress_date", "label": "Progress Date" },
+    { "key": "recorded_at", "label": "Recorded At" },
     { "key": "title", "label": "Title" },
     { "key": "description", "label": "Description" },
     { "key": "status", "label": "Status" },
@@ -105,26 +106,28 @@ Same URL for backward compatibility — response shape expanded.
 
 ## 2. Auto-sync from Edit MOU fields
 
-When user saves **progress-related fields** via:
+When user saves the **Progress** field via:
 
 ```
 PATCH /api/proposals/:id/fields
 ```
 
-Backend auto-creates a progress row if any of these change:
+Backend auto-creates a progress row **only when `executive_summary.progress` changes**.
 
-| Field path | UI label |
-|------------|----------|
-| `executive_summary.progress` | Progress |
-| `executive_summary.bottlenecks` | Bottleneck |
-| `executive_summary.tentative_timeline` | Tentative Timeline |
-| `executive_summary.mou_operational_status` | Status |
-| `executive_summary.current_status` | Current Status |
-| `executive_summary.action_taken` | Action Taken |
-| `executive_summary.location` | Location |
-| `proposal_description` | Outcome / Description |
+| Field path | Progress tab row? |
+|------------|-------------------|
+| `executive_summary.progress` | ✅ Yes |
+| `executive_summary.bottlenecks` | ❌ No |
+| `executive_summary.tentative_timeline` | ❌ No |
+| `executive_summary.mou_operational_status` | ❌ No |
+| `executive_summary.current_status` | ❌ No |
+| `executive_summary.action_taken` | ❌ No |
+| `executive_summary.location` | ❌ No |
+| `proposal_description` | ❌ No |
 
-**Response includes:**
+Other MOU fields still save on MOU Details — they just do **not** appear in the Progress tab log.
+
+**Response includes (only when Progress changed):**
 
 ```json
 {
@@ -143,10 +146,12 @@ Backend auto-creates a progress row if any of these change:
 2. Refresh Progress tab table
 
 **Synced row defaults:**
-- `title`: `"MOU progress fields updated"`
-- `description`: `"Progress: old → new"` (one line per field)
+- `title`: `"Progress field updated"`
+- `description`: `"Progress: old → new"`
 - `source`: `mou_field_sync`
 - `status`: `recorded`
+
+**List filter:** API hides old `mou_field_sync` rows that were only Location / Bottleneck / etc. Manual entries always show.
 
 ### Reverse sync — Progress tab → MOU Details
 
@@ -202,9 +207,9 @@ Bottleneck: nil → nil1
 
 **Frontend after save on `mou_field_sync` row:**
 1. Progress table row response se update karo
-2. **MOU Details tab** ke liye `GET /api/proposals/:id` dubara call karo (ya `mou_sync.mou_fields` se local state patch karo)
+2. **MOU Details tab** ke liye `GET /api/proposals/:id` dubara call karo (ya `mou_fields` / `mou_fields_synced` se local state patch karo)
 
-**Manual progress rows** (`source: manual`) MOU Details par effect nahi karti — sirf log entry hain.
+**Manual progress rows** (`source: manual`) ab **MOU Details → Progress** field ko bhi update karti hain — timestamp ke sath.
 
 ---
 
@@ -214,6 +219,16 @@ Bottleneck: nil → nil1
 POST /api/proposals/:id/activities
 ```
 
+**Modal → API field mapping**
+
+| Modal field | API field | Notes |
+|-------------|-----------|-------|
+| Work Date | `activity_date` | Aliases: `work_date`, `progress_date` |
+| Title | `title` | Required |
+| What was done? | `description` | **Required.** Aliases: `what_was_done`, `work_done` |
+| Comment (optional) | `comment` | Saved as first comment |
+| Proof file | `support_file_url` | Upload first, then send URL |
+
 **Body:**
 
 ```json
@@ -221,12 +236,17 @@ POST /api/proposals/:id/activities
   "activity_date": "2026-07-06",
   "title": "Site visit completed",
   "description": "What was done",
+  "what_was_done": "What was done",
   "support_file_url": "http://localhost:5000/uploads/proof.pdf",
   "comment": "Optional — saved as first comment"
 }
 ```
 
 **Response `201`:** single progress object (`status: recorded`, `approval_required: false`)
+
+- `description` → Progress tab **DESCRIPTION** column
+- `recorded_at` → full timestamp (PKT), e.g. `7 Jul 2026, 12:38 pm` — table mein **Recorded At** column dikhao
+- `mou_fields.progress` → MOU Details **Progress** field update hota hai: `[7 Jul 2026, 12:38 pm] What was done`
 
 No approval step after create.
 

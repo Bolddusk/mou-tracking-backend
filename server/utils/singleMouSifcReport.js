@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const {
   formatCommentsForReport,
   formatProgressSheetRow,
+  filterProgressTabActivities,
   POKE_TITLE,
 } = require('./progressActivity');
 
@@ -78,25 +79,27 @@ async function fetchActivitiesForReport(proposalId) {
     [ids]
   );
 
-  return rows
-    .filter((row) => row.title !== POKE_TITLE)
-    .map((activity) => {
-      const activityDate = activity.activity_date
-        ? new Date(activity.activity_date).toISOString().slice(0, 10)
-        : null;
+  return filterProgressTabActivities(
+    rows
+      .filter((row) => row.title !== POKE_TITLE)
+      .map((activity) => {
+        const activityDate = activity.activity_date
+          ? new Date(activity.activity_date).toISOString().slice(0, 10)
+          : null;
 
-      const synced = parseSyncedFields(activity.synced_fields);
-      const activityComments = comments.filter((c) => c.activity_id === activity.id);
+        const synced = parseSyncedFields(activity.synced_fields);
+        const activityComments = comments.filter((c) => c.activity_id === activity.id);
 
-      return {
-        ...activity,
-        activity_date: activityDate,
-        progress_date: activityDate,
-        source: activity.source || 'manual',
-        synced_fields: synced,
-        comments: activityComments,
-      };
-    });
+        return {
+          ...activity,
+          activity_date: activityDate,
+          progress_date: activityDate,
+          source: activity.source || 'manual',
+          synced_fields: synced,
+          comments: activityComments,
+        };
+      })
+  );
 }
 
 function buildMouDetailsRows(proposal, conference) {

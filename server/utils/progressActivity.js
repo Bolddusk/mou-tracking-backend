@@ -4,6 +4,8 @@ const { enrichProposalRow, parseJsonField } = require('./proposalTemplate');
 const POKE_TITLE = 'Update Requested';
 const PROGRESS_RECORDED_STATUS = 'recorded';
 
+const PROGRESS_TAB_SYNC_FIELD = 'executive_summary.progress';
+
 const PROGRESS_FIELD_PATHS = {
   proposal_description: 'Outcome / Description',
   'executive_summary.progress': 'Progress',
@@ -17,6 +19,7 @@ const PROGRESS_FIELD_PATHS = {
 
 const PROGRESS_SHEET_COLUMNS = [
   { key: 'progress_date', label: 'Progress Date' },
+  { key: 'recorded_at', label: 'Recorded At' },
   { key: 'title', label: 'Title' },
   { key: 'description', label: 'Description' },
   { key: 'status', label: 'Status' },
@@ -26,6 +29,52 @@ const PROGRESS_SHEET_COLUMNS = [
   { key: 'comments', label: 'Comments' },
   { key: 'support_file_url', label: 'Support File URL' },
 ];
+
+function normalizeProgressDescriptionInput(body = {}) {
+  const raw =
+    body.description ??
+    body.what_was_done ??
+    body.whatWasDone ??
+    body.work_done ??
+    body.workDone ??
+    null;
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).trim();
+  return text || null;
+}
+
+function normalizeProgressActivityDateInput(body = {}) {
+  const raw = body.activity_date ?? body.work_date ?? body.workDate ?? body.progress_date ?? null;
+  if (!raw) return null;
+  if (raw instanceof Date) return raw.toISOString().slice(0, 10);
+  const text = String(raw).trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return text;
+}
+
+function formatProgressRecordedAt(createdAt, activityDate = null) {
+  const date = createdAt ? new Date(createdAt) : activityDate ? new Date(activityDate) : null;
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('en-GB', {
+    timeZone: 'Asia/Karachi',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function buildManualProgressMouValue(description, { activityDate = null, createdAt = null } = {}) {
+  const text = String(description || '').trim();
+  if (!text) return null;
+  const stamp = formatProgressRecordedAt(createdAt, activityDate);
+  return stamp ? `[${stamp}] ${text}` : text;
+}
 
 function getByPath(obj, path) {
   return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : ''), obj);
@@ -87,6 +136,48 @@ function extractProgressFieldChanges(beforeRow, updates) {
   });
 
   return changes;
+}
+
+function extractProgressTabFieldChanges(beforeRow, updates) {
+  return extractProgressFieldChanges(beforeRow, updates).filter(
+    (change) => change.field === PROGRESS_TAB_SYNC_FIELD
+  );
+}
+
+function parseActivitySyncedFields(raw) {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'object') return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProgressTabEntry(activity) {
+  if (!activity) return false;
+  if (activity.title === POKE_TITLE) return false;
+
+  const source = activity.source || 'manual';
+  if (source !== 'mou_field_sync') return true;
+
+  const synced = parseActivitySyncedFields(activity.synced_fields);
+  if (synced?.length) {
+    return synced.some((change) => change.field === PROGRESS_TAB_SYNC_FIELD);
+  }
+
+  const firstLine = String(activity.description || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  return Boolean(firstLine && /^Progress:/i.test(firstLine));
+}
+
+function filterProgressTabActivities(activities = []) {
+  return activities.filter(isProgressTabEntry);
 }
 
 function buildProgressSyncDescription(changes) {
@@ -201,10 +292,13 @@ function formatProgressStatusLabel(status) {
 function formatProgressSheetRow(activity) {
   const commentsPlain = formatCommentsPlain(activity.comments);
   const commentsReport = formatCommentsForReport(activity.comments);
+  const recordedAt = formatProgressRecordedAt(activity.created_at, activity.activity_date);
   return {
     id: activity.id,
     progress_date: activity.progress_date || activity.activity_date || null,
     activity_date: activity.activity_date || null,
+    created_at: activity.created_at || null,
+    recorded_at: recordedAt,
     title: activity.title || '',
     description: activity.description || '',
     status: formatProgressStatusLabel(activity.status),
@@ -228,10 +322,13 @@ function formatProgressSheetRow(activity) {
 function mapActivityToProgress(activity, user = null) {
   const capabilities = resolveProgressCapabilities(activity, user);
   const enriched = { ...activity, ...capabilities };
+  const recordedAt = formatProgressRecordedAt(activity.created_at, activity.activity_date);
 
   return {
     ...enriched,
     progress_date: activity.activity_date,
+    created_at: activity.created_at || null,
+    recorded_at: recordedAt,
     approval_required: false,
     can_approve: false,
     can_reject: false,
@@ -367,13 +464,45 @@ async function syncProgressEntryToProposal(proposalRow, activity, body = {}) {
   };
 }
 
+async function syncManualProgressToProposal(proposalRow, { description, activityDate, createdAt } = {}) {
+  const progressValue = buildManualProgressMouValue(description, {
+    activityDate,
+    createdAt,
+  });
+  if (!progressValue) return null;
+
+  const before = enrichProposalRow(proposalRow);
+  const execPatch = { ...before.executive_summary, progress: progressValue };
+
+  await pool.query('UPDATE proposals SET executive_summary = ? WHERE id = ?', [
+    JSON.stringify(execPatch),
+    proposalRow.id,
+  ]);
+
+  const enriched = enrichProposalRow({ ...proposalRow, executive_summary: execPatch });
+  return {
+    synced: true,
+    applied_fields: { 'executive_summary.progress': progressValue },
+    mou_fields: {
+      progress: enriched.executive_summary?.progress || '',
+      bottlenecks: enriched.executive_summary?.bottlenecks || '',
+      tentative_timeline: enriched.executive_summary?.tentative_timeline || '',
+      mou_operational_status: enriched.executive_summary?.mou_operational_status || '',
+      current_status: enriched.executive_summary?.current_status || '',
+      action_taken: enriched.executive_summary?.action_taken || '',
+      location: enriched.executive_summary?.location || '',
+      proposal_description: enriched.proposal_description || '',
+    },
+  };
+}
+
 async function recordProgressFromFieldUpdates({ proposalId, user, beforeRow, updates }) {
-  const changes = extractProgressFieldChanges(beforeRow, updates);
+  const changes = extractProgressTabFieldChanges(beforeRow, updates);
   if (!changes.length || !user?.id) return null;
 
   const today = new Date().toISOString().slice(0, 10);
   const description = buildProgressSyncDescription(changes);
-  const title = 'MOU progress fields updated';
+  const title = 'Progress field updated';
 
   const [result] = await pool.query(
     `INSERT INTO proposal_activities
@@ -401,8 +530,12 @@ module.exports = {
   POKE_TITLE,
   PROGRESS_RECORDED_STATUS,
   PROGRESS_FIELD_PATHS,
+  PROGRESS_TAB_SYNC_FIELD,
   PROGRESS_SHEET_COLUMNS,
   extractProgressFieldChanges,
+  extractProgressTabFieldChanges,
+  isProgressTabEntry,
+  filterProgressTabActivities,
   formatProgressSheetRow,
   formatProgressStatusLabel,
   formatCommentsForSheet,
@@ -416,5 +549,10 @@ module.exports = {
   normalizeMouFieldValuesInput,
   buildProposalSqlUpdatesFromFieldPaths,
   syncProgressEntryToProposal,
+  syncManualProgressToProposal,
+  normalizeProgressDescriptionInput,
+  normalizeProgressActivityDateInput,
+  formatProgressRecordedAt,
+  buildManualProgressMouValue,
   recordProgressFromFieldUpdates,
 };
