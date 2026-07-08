@@ -361,6 +361,17 @@ async function conferenceReportToPdf(report) {
   }
 }
 
+async function checkPdfExportAvailable() {
+  const executablePath = await resolveChromeExecutable();
+  return {
+    available: Boolean(executablePath),
+    executable_path: executablePath || null,
+    hint: executablePath
+      ? null
+      : 'Run: npm run puppeteer:install-chrome — or deploy via Docker (includes Chromium)',
+  };
+}
+
 function reportDownloadBasename(conferenceKey) {
   return `SIFC-report-${conferenceKey}`;
 }
@@ -370,4 +381,5 @@ module.exports = {
   conferenceReportToPdf,
   reportDownloadBasename,
   launchPdfBrowser,
+  checkPdfExportAvailable,
 };

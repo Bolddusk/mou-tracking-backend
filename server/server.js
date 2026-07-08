@@ -21,6 +21,7 @@ const { initProposalChat } = require('./socket/proposalChat');
 const { refreshSectorCache } = require('./utils/sectorRegistry');
 const { refreshConferenceCache } = require('./utils/conferenceRegistry');
 const { refreshSifcCategoryCache } = require('./utils/sifcCategoryRegistry');
+const { checkPdfExportAvailable } = require('./utils/conferenceReportFormats');
 
 const app = express();
 const server = http.createServer(app);
@@ -40,7 +41,14 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.get('/health', async (req, res) => {
   try {
     const database = await testConnection();
-    res.json({ status: 'ok', database });
+    const pdf = await checkPdfExportAvailable();
+    res.json({
+      status: 'ok',
+      database,
+      pdf_export: pdf.available ? 'available' : 'unavailable',
+      pdf_browser: pdf.executable_path,
+      ...(pdf.hint ? { pdf_hint: pdf.hint } : {}),
+    });
   } catch (err) {
     res.status(503).json({ status: 'error', error: 'Database unavailable' });
   }

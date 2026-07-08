@@ -89,6 +89,7 @@
     "db:rollback:multi-country": "node server/scripts/rollbackMultiCountryMatchmaking.js",
     "db:rollback:matchmaking": "node server/scripts/rollbackMatchmaking.js",
     "puppeteer:install-chrome": "puppeteer browsers install chrome",
+    "postinstall": "node server/scripts/ensurePdfBrowser.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

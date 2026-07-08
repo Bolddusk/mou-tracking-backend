@@ -118,12 +118,62 @@ window.location.href = `/api/proposals/${id}/sifc-report?format=xlsx`;
 
 ## Errors
 
-| Code | When |
-|------|------|
-| 400 | Draft MOU |
-| 403 | No access |
-| 404 | Not found |
-| 503 | PDF — no Chromium |
+| Status | Meaning |
+|--------|---------|
+| `503` + Chromium message | Server par Chrome/Chromium nahi — neeche **Live deploy** dekho |
+| `403` | Role not allowed |
+| `404` | Proposal not found |
+| `400` draft | Draft MOU export nahi hota |
+
+---
+
+## Live deploy — PDF fix (production)
+
+**Problem:** `503 PDF export unavailable — Chromium not installed on server`
+
+**Verify:** `GET https://mou-api.malgary.com/health` — `pdf_export` should be `"available"`.
+
+### Option A — Docker (recommended)
+
+```bash
+docker build -t mou-tracking-backend .
+docker run -d -p 5000:5000 --env-file .env mou-tracking-backend
+```
+
+`Dockerfile` already installs Chromium and sets `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`.
+
+### Option B — PM2 / bare VPS (no Docker)
+
+SSH into server, then:
+
+```bash
+cd /path/to/mou-tracking-backend
+git pull origin main
+npm ci          # postinstall downloads Puppeteer Chrome if system Chromium missing
+# OR manually:
+npm run puppeteer:install-chrome
+pm2 restart all
+```
+
+**Or** install system Chromium:
+
+```bash
+sudo apt-get update && sudo apt-get install -y chromium
+```
+
+Add to server `.env`:
+
+```
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+```
+
+Restart API after any change.
+
+### Fallback (no server change)
+
+- Excel: `?format=xlsx`
+- JSON preview + browser Print to PDF
 
 ---
 
