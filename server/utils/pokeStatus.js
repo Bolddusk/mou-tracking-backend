@@ -1,10 +1,14 @@
 const pool = require('../config/db');
-
-const POKE_TITLE = 'Update Requested';
+const {
+  POKE_TITLE,
+  derivePokeWorkflowStatus,
+  formatPokeResponsePayload,
+} = require('./pokeWorkflow');
 
 const ROLE_LABELS = {
   sector_lead: 'Sector Lead',
   super_admin: 'Super Admin',
+  admin: 'Admin',
 };
 
 async function attachPokeStatus(proposals) {
@@ -14,10 +18,15 @@ async function attachPokeStatus(proposals) {
 
   const [pokes] = await pool.query(
     `SELECT a.proposal_id, a.id, a.added_by_role, a.created_at,
-            a.response_submitted_at, a.response_title, u.full_name AS poked_by_name
+            a.response_submitted_at, a.response_title, a.response_description,
+            a.response_date, a.response_support_file_url, a.response_promoted_at,
+            a.promoted_progress_activity_id, u.full_name AS poked_by_name
      FROM proposal_activities a
      JOIN users u ON u.id = a.added_by
-     WHERE a.proposal_id IN (?) AND a.title = ?
+     WHERE a.proposal_id IN (?)
+       AND a.title = ?
+       AND a.poke_dismissed_at IS NULL
+       AND a.response_promoted_at IS NULL
      ORDER BY a.created_at DESC`,
     [ids, POKE_TITLE]
   );
@@ -35,16 +44,10 @@ async function attachPokeStatus(proposals) {
       return { ...proposal, poke_status: buildPokeStatus('none') };
     }
 
-    if (poke.response_submitted_at) {
-      return {
-        ...proposal,
-        poke_status: buildPokeStatus('answered', poke),
-      };
-    }
-
+    const workflowStatus = derivePokeWorkflowStatus(poke);
     return {
       ...proposal,
-      poke_status: buildPokeStatus('pending_response', poke),
+      poke_status: buildPokeStatus(workflowStatus, poke),
     };
   });
 }
@@ -73,8 +76,10 @@ function buildPokeStatus(status, poke = null) {
     };
   }
 
+  const response = formatPokeResponsePayload(poke);
+
   return {
-    status: 'answered',
+    status: 'awaiting_review',
     poke_activity_id: poke.id,
     poked_by_name: poke.poked_by_name,
     poked_by_role: poke.added_by_role,
@@ -82,9 +87,10 @@ function buildPokeStatus(status, poke = null) {
     poked_at: poke.created_at,
     answered_at: poke.response_submitted_at,
     answer_title: poke.response_title,
-    label: `${who} requested an update — Response submitted`,
-    short_label: `Update requested by ${who} · Answered`,
+    party_a_response: response,
+    label: `${who} requested an update — Party A response ready for review`,
+    short_label: `Update requested by ${who} · Ready for review`,
   };
 }
 
-module.exports = { attachPokeStatus, buildPokeStatus };
+module.exports = { attachPokeStatus, buildPokeStatus, POKE_TITLE };

@@ -19,16 +19,27 @@ const {
   progressRowsToCsv,
   progressRowsToXlsx,
 } = require('../utils/progressSheetExport');
+const {
+  assertCanCreatePoke,
+  buildPokeWorkflowCapabilities,
+  derivePokeWorkflowStatus,
+  dismissUpdateRequest,
+  dismissAllPendingUpdateRequests,
+  formatPokeResponsePayload,
+  getLatestOpenPoke,
+  REVIEWER_ROLES,
+} = require('../utils/pokeWorkflow');
+const { attachPokeStatus } = require('../utils/pokeStatus');
 
 const PROPOSAL_SELECT = `
-  SELECT p.*, pa.full_name AS party_a_name
+  SELECT p.*, pa.full_name AS party_a_name, pa.email AS party_a_user_email
   FROM proposals p
   JOIN users pa ON pa.id = p.party_a_id
 `;
 
 const POKE_TITLE_LEGACY = POKE_TITLE;
-const ACTIVITY_ROLES = ['party_a', 'sector_lead', 'super_admin'];
-const REVIEWER_ROLES = ['sector_lead', 'super_admin'];
+const ACTIVITY_ROLES = ['party_a', 'sector_lead', 'super_admin', 'admin'];
+const REVIEWER_ROLES_LEGACY = ['sector_lead', 'super_admin'];
 
 const ACTIVITY_SELECT = `
   SELECT a.*,
@@ -81,17 +92,9 @@ async function enrichActivities(activities) {
   return activities.map((activity) => {
     const isPoke = activity.title === POKE_TITLE_LEGACY;
     const pokeResponse = activity.response_submitted_at
-      ? {
-          work_date: activity.response_date
-            ? new Date(activity.response_date).toISOString().slice(0, 10)
-            : activity.response_date,
-          title: activity.response_title,
-          description: activity.response_description,
-          support_file_url: activity.response_support_file_url,
-          submitted_at: activity.response_submitted_at,
-          submitted_by_name: activity.response_by_name,
-        }
+      ? formatPokeResponsePayload(activity)
       : null;
+    const pokeWorkflowStatus = isPoke ? derivePokeWorkflowStatus(activity) : null;
 
     return {
       ...activity,
@@ -104,7 +107,10 @@ async function enrichActivities(activities) {
       source: activity.source || 'manual',
       synced_fields: parseSyncedFields(activity.synced_fields),
       is_poke: isPoke,
-      can_respond: isPoke && !activity.response_submitted_at,
+      poke_workflow_status: pokeWorkflowStatus,
+      can_respond: isPoke && pokeWorkflowStatus === 'pending_response',
+      can_edit_poke_response: isPoke && pokeWorkflowStatus === 'awaiting_review',
+      can_promote_to_progress: isPoke && pokeWorkflowStatus === 'awaiting_review',
       approval_required: false,
       can_approve: false,
       can_reject: false,
@@ -285,7 +291,7 @@ async function getProposalActivities(req, res) {
 
 async function pokeForUpdate(req, res) {
   try {
-    if (!REVIEWER_ROLES.includes(req.user.role)) {
+    if (!REVIEWER_ROLES_LEGACY.includes(req.user.role) && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -296,17 +302,30 @@ async function pokeForUpdate(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
+    const pokeCheck = await assertCanCreatePoke(proposal);
+    if (!pokeCheck.ok) {
+      return res.status(pokeCheck.status).json({
+        error: pokeCheck.error,
+        code: pokeCheck.code || undefined,
+      });
+    }
+
     const today = new Date().toISOString().slice(0, 10);
 
     const [result] = await pool.query(
       `INSERT INTO proposal_activities
         (proposal_id, added_by, added_by_role, activity_date, title, description, status)
-       VALUES (?, ?, ?, ?, 'Update Requested', 'Please provide latest update on this proposal', 'pending')`,
-      [proposalId, req.user.id, req.user.role, today]
+       VALUES (?, ?, ?, ?, ?, 'Please provide latest update on this MOU', 'pending')`,
+      [proposalId, req.user.id, req.user.role, today, POKE_TITLE_LEGACY]
     );
 
     const activity = await getActivityWithRelations(result.insertId);
-    return res.status(201).json(activity);
+    const [withPoke] = await attachPokeStatus([proposal]);
+    return res.status(201).json({
+      ...activity,
+      poke_status: withPoke.poke_status,
+      update_request: buildPokeWorkflowCapabilities(req, proposal, activity),
+    });
   } catch (err) {
     console.error('Poke error:', err.message);
     return res.status(500).json({ error: 'Failed to send update request' });
@@ -649,6 +668,31 @@ async function getComments(req, res) {
   }
 }
 
+async function verifyPokeReviewAccess(req, activity) {
+  if (!activity) return { error: 'Update request not found', status: 404 };
+  if (activity.title !== POKE_TITLE_LEGACY) {
+    return { error: 'This activity is not an update request', status: 400 };
+  }
+  if (activity.poke_dismissed_at) {
+    return { error: 'This update request was dismissed', status: 400 };
+  }
+  if (activity.response_promoted_at) {
+    return { error: 'This update was already moved to Progress', status: 400 };
+  }
+
+  const proposal = await getProposalById(activity.proposal_id);
+  const access = await checkProposalAccess(req, proposal);
+  if (!access.ok) {
+    return { error: access.error, status: access.status };
+  }
+
+  if (!REVIEWER_ROLES.has(req.user.role)) {
+    return { error: 'Only Sector Lead or Super Admin can review update requests', status: 403 };
+  }
+
+  return { ok: true, activity, proposal };
+}
+
 async function respondToPoke(req, res) {
   try {
     if (req.user.role !== 'party_a') {
@@ -664,6 +708,10 @@ async function respondToPoke(req, res) {
       return res.status(400).json({ error: 'This activity is not a poke request' });
     }
 
+    if (activity.poke_dismissed_at) {
+      return res.status(400).json({ error: 'This update request is no longer active' });
+    }
+
     if (activity.response_submitted_at) {
       return res.status(400).json({ error: 'This poke has already been answered' });
     }
@@ -673,10 +721,19 @@ async function respondToPoke(req, res) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const { activity_date, title, description, support_file_url, comment } = req.body;
+    const activity_date = normalizeProgressActivityDateInput(req.body);
+    const title = req.body.title;
+    const description = normalizeProgressDescriptionInput(req.body);
+    const { support_file_url, comment } = req.body;
 
     if (!activity_date || !title?.trim()) {
       return res.status(400).json({ error: 'activity_date and title are required' });
+    }
+
+    if (!description) {
+      return res.status(400).json({
+        error: 'description is required (what was done)',
+      });
     }
 
     await pool.query(
@@ -691,7 +748,7 @@ async function respondToPoke(req, res) {
       [
         activity_date,
         title.trim(),
-        description || null,
+        description,
         support_file_url || null,
         req.user.id,
         req.params.activityId,
@@ -707,10 +764,215 @@ async function respondToPoke(req, res) {
     }
 
     const updated = await getActivityWithRelations(req.params.activityId);
-    return res.json(updated);
+    const [withPoke] = await attachPokeStatus([proposal]);
+    return res.json({
+      ...updated,
+      poke_status: withPoke.poke_status,
+      update_request: buildPokeWorkflowCapabilities(req, proposal, updated),
+    });
   } catch (err) {
     console.error('Respond to poke error:', err.message);
     return res.status(500).json({ error: 'Failed to submit poke response' });
+  }
+}
+
+async function editPokeResponse(req, res) {
+  try {
+    const activity = await getActivityById(req.params.activityId);
+    const check = await verifyPokeReviewAccess(req, activity);
+    if (!check.ok) {
+      return res.status(check.status).json({ error: check.error });
+    }
+
+    if (!activity.response_submitted_at) {
+      return res.status(400).json({ error: 'Party A has not submitted an update yet' });
+    }
+
+    const activity_date = normalizeProgressActivityDateInput(req.body);
+    const title = req.body.title;
+    const description = normalizeProgressDescriptionInput(req.body);
+    const { support_file_url } = req.body;
+
+    if (activity_date === null && req.body.activity_date !== undefined) {
+      return res.status(400).json({ error: 'activity_date is invalid' });
+    }
+    if (title !== undefined && !String(title).trim()) {
+      return res.status(400).json({ error: 'title cannot be empty' });
+    }
+    if (
+      description === null &&
+      (req.body.description !== undefined || req.body.what_was_done !== undefined)
+    ) {
+      return res.status(400).json({ error: 'description cannot be empty' });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (activity_date !== null && req.body.activity_date !== undefined) {
+      updates.push('response_date = ?');
+      values.push(activity_date);
+    }
+    if (title !== undefined) {
+      updates.push('response_title = ?');
+      values.push(String(title).trim());
+    }
+    if (description !== null && (req.body.description !== undefined || req.body.what_was_done !== undefined)) {
+      updates.push('response_description = ?');
+      values.push(description);
+    }
+    if (support_file_url !== undefined) {
+      updates.push('response_support_file_url = ?');
+      values.push(support_file_url || null);
+    }
+
+    if (!updates.length) {
+      return res.status(400).json({ error: 'No fields provided to update' });
+    }
+
+    values.push(req.params.activityId);
+    await pool.query(`UPDATE proposal_activities SET ${updates.join(', ')} WHERE id = ?`, values);
+
+    const updated = await getActivityWithRelations(req.params.activityId);
+    const [withPoke] = await attachPokeStatus([check.proposal]);
+    return res.json({
+      ...updated,
+      poke_status: withPoke.poke_status,
+      update_request: buildPokeWorkflowCapabilities(req, check.proposal, updated),
+    });
+  } catch (err) {
+    console.error('Edit poke response error:', err.message);
+    return res.status(500).json({ error: 'Failed to edit update response' });
+  }
+}
+
+async function promotePokeToProgress(req, res) {
+  try {
+    const activity = await getActivityById(req.params.activityId);
+    const check = await verifyPokeReviewAccess(req, activity);
+    if (!check.ok) {
+      return res.status(check.status).json({ error: check.error });
+    }
+
+    if (!activity.response_submitted_at) {
+      return res.status(400).json({ error: 'Party A has not submitted an update yet' });
+    }
+
+    const proposal = check.proposal;
+    const activityDate = activity.response_date
+      ? new Date(activity.response_date).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const title = String(activity.response_title || 'Party A update').trim();
+    const description = String(activity.response_description || '').trim();
+
+    if (!description) {
+      return res.status(400).json({ error: 'Update description is empty — edit the response first' });
+    }
+
+    const [insertResult] = await pool.query(
+      `INSERT INTO proposal_activities
+        (proposal_id, added_by, added_by_role, activity_date, title, description, support_file_url, status, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual')`,
+      [
+        proposal.id,
+        req.user.id,
+        req.user.role,
+        activityDate,
+        title,
+        description,
+        activity.response_support_file_url || null,
+        PROGRESS_RECORDED_STATUS,
+      ]
+    );
+
+    const progressId = insertResult.insertId;
+
+    if (req.body.comment && String(req.body.comment).trim()) {
+      await pool.query(
+        `INSERT INTO activity_comments (activity_id, commented_by, commented_by_role, comment)
+         VALUES (?, ?, ?, ?)`,
+        [progressId, req.user.id, req.user.role, String(req.body.comment).trim()]
+      );
+    }
+
+    await pool.query(
+      `UPDATE proposal_activities
+       SET response_promoted_at = NOW(),
+           response_promoted_by = ?,
+           promoted_progress_activity_id = ?
+       WHERE id = ?`,
+      [req.user.id, progressId, req.params.activityId]
+    );
+
+    const progressActivity = await getActivityWithRelations(progressId);
+    const mouSync = await syncManualProgressToProposal(proposal, {
+      description,
+      activityDate,
+      createdAt: progressActivity.created_at,
+    });
+
+    const [withPoke] = await attachPokeStatus([proposal]);
+    const payload = mapActivityToProgress(progressActivity, req.user);
+    if (mouSync) {
+      payload.mou_fields_synced = mouSync.applied_fields;
+      payload.mou_fields = mouSync.mou_fields;
+    }
+
+    return res.status(201).json({
+      message: 'Party A update moved to Progress',
+      progress_entry: payload,
+      poke_status: withPoke.poke_status,
+      update_request: buildPokeWorkflowCapabilities(req, proposal, null),
+    });
+  } catch (err) {
+    console.error('Promote poke to progress error:', err.message);
+    return res.status(500).json({ error: 'Failed to move update to Progress' });
+  }
+}
+
+async function dismissUpdateRequestActivity(req, res) {
+  try {
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only Super Admin can dismiss update requests' });
+    }
+
+    const activity = await getActivityById(req.params.activityId);
+    if (!activity || activity.title !== POKE_TITLE_LEGACY) {
+      return res.status(404).json({ error: 'Update request not found' });
+    }
+
+    const ok = await dismissUpdateRequest(req.params.activityId, req.user.id);
+    if (!ok) {
+      return res.status(400).json({ error: 'Update request is already closed' });
+    }
+
+    const proposal = await getProposalById(activity.proposal_id);
+    const [withPoke] = await attachPokeStatus([proposal]);
+    return res.json({
+      message: 'Update request dismissed',
+      poke_status: withPoke.poke_status,
+      update_request: buildPokeWorkflowCapabilities(req, proposal, null),
+    });
+  } catch (err) {
+    console.error('Dismiss update request error:', err.message);
+    return res.status(500).json({ error: 'Failed to dismiss update request' });
+  }
+}
+
+async function dismissAllPendingUpdateRequestsHandler(req, res) {
+  try {
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only Super Admin can clear pending update requests' });
+    }
+
+    const result = await dismissAllPendingUpdateRequests(req.user.id);
+    return res.json({
+      message: 'All pending update requests cleared',
+      ...result,
+    });
+  } catch (err) {
+    console.error('Dismiss all pending update requests error:', err.message);
+    return res.status(500).json({ error: 'Failed to clear pending update requests' });
   }
 }
 
@@ -739,6 +1001,10 @@ module.exports = {
   grantProgressEditUnlock,
   pokeForUpdate,
   respondToPoke,
+  editPokeResponse,
+  promotePokeToProgress,
+  dismissUpdateRequestActivity,
+  dismissAllPendingUpdateRequestsHandler,
   approveActivity,
   rejectActivity,
   addComment,

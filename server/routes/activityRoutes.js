@@ -8,6 +8,9 @@ const {
   getComments,
   uploadSupportFile,
   respondToPoke,
+  editPokeResponse,
+  promotePokeToProgress,
+  dismissUpdateRequestActivity,
   updateProgressEntry,
   deleteProgressEntry,
   requestProgressEditUnlock,
@@ -38,6 +41,27 @@ router.post(
   verifyToken,
   requireRole('party_a'),
   respondToPoke
+);
+
+router.patch(
+  '/:activityId/poke-response',
+  verifyToken,
+  requireRole('sector_lead', 'super_admin', 'admin'),
+  editPokeResponse
+);
+
+router.post(
+  '/:activityId/promote-to-progress',
+  verifyToken,
+  requireRole('sector_lead', 'super_admin', 'admin'),
+  promotePokeToProgress
+);
+
+router.post(
+  '/:activityId/dismiss-update-request',
+  verifyToken,
+  requireRole('super_admin'),
+  dismissUpdateRequestActivity
 );
 
 router.patch('/:activityId/approve', ...reviewerRoles, approveActivity);

@@ -94,6 +94,7 @@ async function provisionPartyAForProposal(proposal) {
   }
 
   await pool.query('UPDATE proposals SET party_a_id = ? WHERE id = ?', [userId, proposal.id]);
+  await pool.query('INSERT IGNORE INTO party_a_profiles (user_id) VALUES (?)', [userId]);
 
   if (rawPassword) {
     if (shouldReturnCredentialsInResponse()) {

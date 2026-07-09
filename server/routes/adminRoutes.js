@@ -48,6 +48,7 @@ const {
   listPermissionBundles,
   grantPermissionBundle,
 } = require('../controllers/adminRbacController');
+const { dismissAllPendingUpdateRequestsHandler } = require('../controllers/activityController');
 
 const router = express.Router();
 
@@ -58,6 +59,11 @@ const slReassign = [verifyToken, requireAnyPermission('nav.sector_lead.reassign'
 const complianceAdmin = [verifyToken, requireAnyPermission('nav.compliance.audit', 'admin.compliance')];
 
 router.patch('/sector-lead/reassign', ...slReassign, reassignSectorLead);
+router.post(
+  '/update-requests/dismiss-all-pending',
+  ...superAdmin,
+  dismissAllPendingUpdateRequestsHandler
+);
 router.get('/sector-lead/reassignments', ...slReassign, getReassignments);
 router.get('/sector-lead/orphans', ...slReassign, getOrphans);
 

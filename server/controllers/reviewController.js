@@ -4,7 +4,13 @@ const { canChangeProposalSector } = require('../utils/proposalFieldEdit');
 const { canArchiveProposals, isProposalArchived } = require('../utils/proposalSoftDelete');
 const { loadUserPermissions } = require('../utils/rolePermissions');
 const { attachPokeStatus } = require('../utils/pokeStatus');
+const {
+  buildPokeWorkflowCapabilities,
+  getLatestOpenPoke,
+} = require('../utils/pokeWorkflow');
+const { persistOperationalSyncForProposal } = require('../utils/directMouOperationalSync');
 const { enrichProposals, enrichProposalRow } = require('../utils/proposalTemplate');
+const { provisionPartyAForProposal } = require('../utils/partyAProvisioner');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const {
   PROPOSAL_STATUSES,
@@ -210,13 +216,17 @@ async function getProposalDetail(req, res) {
 
     const parsed = enrichProposalRow(proposal);
     const [withPoke] = await attachPokeStatus([parsed]);
+    const openPoke = await getLatestOpenPoke(proposal.id);
     const [partyAProfile, partyBProfile] = await Promise.all([
       loadPartyAProfileSnapshot(req.user, proposal.party_a_id, proposal),
       loadPartyBProfileSnapshot(req.user, proposal.party_b_user_id, proposal),
     ]);
     const userPermissions = await loadUserPermissions(req.user);
+    const updateRequest = buildPokeWorkflowCapabilities(req, parsed, openPoke);
     const capabilities = {
       ...buildProposalCapabilities(req, proposal, access, userPermissions),
+      ...updateRequest,
+      can_dismiss_all_pending_update_requests: req.user.role === 'super_admin',
       can_change_sector: canChangeProposalSector(req.user) && !isProposalArchived(proposal),
       can_archive_proposal:
         canArchiveProposals(req.user) && !isProposalArchived(proposal) && proposal.status !== 'draft',
@@ -278,6 +288,8 @@ async function approveProposal(req, res) {
       [comment || null, req.user.id, req.params.id]
     );
 
+    await persistOperationalSyncForProposal(pool, proposal);
+
     await logProposalAction({
       proposalId: req.params.id,
       user: req.user,
@@ -291,30 +303,29 @@ async function approveProposal(req, res) {
     });
 
     const approved = await getProposalById(req.params.id);
-    const partyBResult = await provisionPartyBForProposal(approved);
+    const [partyAResult, partyBResult] = await Promise.all([
+      provisionPartyAForProposal(approved),
+      provisionPartyBForProposal(approved),
+    ]);
     const updated = await getProposalById(req.params.id);
 
     let message = 'Proposal approved';
-    if (partyBResult.skipped) {
+    if (partyAResult.skipped && partyBResult.skipped) {
+      message = 'Proposal approved (Party A/B emails missing — accounts not created)';
+    } else if (partyAResult.skipped) {
+      message = 'Proposal approved (Party A email or contact missing — account not created)';
+    } else if (partyBResult.skipped) {
       message = 'Proposal approved (Party B email missing — account not created)';
-    } else if (partyBResult.credentials) {
-      message = partyBResult.email_sent
-        ? 'Proposal approved — Party B credentials also in response'
-        : 'Proposal approved — Party B credentials in response (share with Party B)';
-    } else if (partyBResult.existing_account) {
-      message =
-        'Proposal approved, Party B linked to existing account — issue credentials from Users if needed';
-    } else if (partyBResult.email_sent) {
-      message = 'Proposal approved, Party B credentials sent by email';
-    } else if (partyBResult.account_created) {
-      message = 'Proposal approved, Party B account created';
-    } else if (partyBResult.linked) {
-      message = 'Proposal approved, Party B linked';
+    } else if (partyAResult.account_created || partyBResult.account_created) {
+      message = 'Proposal approved — Party A/B accounts linked or created';
+    } else if (partyAResult.linked || partyBResult.linked) {
+      message = 'Proposal approved — Party A/B linked';
     }
 
     return res.json({
       message,
       proposal: updated,
+      party_a: partyAResult,
       party_b: partyBResult,
     });
   } catch (err) {

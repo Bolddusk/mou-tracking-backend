@@ -7,6 +7,7 @@ const {
   buildPartyAContactsDisplay,
   buildPartyBContactsDisplay,
 } = require('./partyContactsDisplay');
+const { applyDirectMouOperationalSync } = require('./directMouOperationalSync');
 const {
   EMPTY_PARTY_B_INFO,
   buildPartyBInfoFromRow,
@@ -67,6 +68,11 @@ const SCALAR_DRAFT_FIELDS = [
   'mou_sector',
   'mou_demand',
   'mou_file_url',
+  'cooperation_mode',
+  'investment_value_usd',
+  'proposal_description',
+  'conference_key',
+  'conference_name',
 ];
 
 const EMPTY_CONFERENCE_INFO = {
@@ -349,6 +355,8 @@ function buildDraftUpdates(body) {
     updates.proposal_title = updates.venture_name || updates.company_name || '';
   }
 
+  applyDirectMouOperationalSync(updates, body);
+
   return stringifyJsonFields(updates);
 }
 
@@ -370,7 +378,6 @@ function validateSubmit(proposal) {
     { key: 'party_b_country', label: 'Party B Country' },
     { key: 'mou_scope', label: 'MOU Scope' },
     { key: 'mou_description', label: 'MOU Description' },
-    { key: 'mou_sector', label: 'MOU Sector' },
     { key: 'mou_demand', label: 'MOU Demand' },
     { key: 'mou_file_url', label: 'MOU File' },
   ];

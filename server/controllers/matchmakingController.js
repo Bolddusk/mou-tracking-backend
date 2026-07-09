@@ -8,6 +8,7 @@ const {
   buildEngagementRowFromMatch,
   hasMeaningfulMmDraft,
 } = require('../utils/mmProposalTemplate');
+const { provisionPartyAForProposal } = require('../utils/partyAProvisioner');
 const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const {
   getMmProposalForSubmitter,
@@ -575,12 +576,16 @@ async function createMatch(req, res) {
     const [engagementRows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [
       engagementId,
     ]);
-    const partyBResult = await provisionPartyBForProposal(engagementRows[0]);
+    const [partyAResult, partyBResult] = await Promise.all([
+      provisionPartyAForProposal(engagementRows[0]),
+      provisionPartyBForProposal(engagementRows[0]),
+    ]);
 
     const match = await getMatchById(result.insertId);
     return res.status(201).json({
       ...formatMatch(match),
       engagement_proposal_id: engagementId,
+      party_a: partyAResult,
       party_b: partyBResult,
     });
   } catch (err) {
