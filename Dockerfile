@@ -15,7 +15,8 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# Chromium already installed above — skip postinstall (needs full repo copy)
+RUN npm ci --omit=dev --ignore-scripts
 
 COPY . .
 
