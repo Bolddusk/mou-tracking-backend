@@ -58,7 +58,7 @@ const sectorLeadList = [
 ];
 const allProposalsList = [
   verifyToken,
-  requireRole('super_admin'),
+  requireRole('super_admin', 'admin'),
   requireAnyPermission('proposals.list_all'),
 ];
 const changeLogMouOptionsRoles = [verifyToken, requireRole('super_admin', 'admin')];

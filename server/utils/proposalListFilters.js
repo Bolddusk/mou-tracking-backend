@@ -9,6 +9,9 @@ const {
   MOU_LIFECYCLE_FILTERS,
   buildMouLifecycleWhere,
   isValidMouLifecycleFilter,
+  EXECUTION_SQL,
+  INACTIVE_SQL,
+  MOU_LIFECYCLE_LABELS,
 } = require('./mouLifecycle');
 
 const PROPOSAL_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'resubmitted', 'completed'];
@@ -180,6 +183,42 @@ function buildProposalListWhere(query, options = {}) {
   };
 }
 
+const DASHBOARD_LIST_TAB_FILTERS = [
+  { key: 'all', label: 'All', query: {} },
+  ...MOU_LIFECYCLE_FILTERS.map((value) => ({
+    key: value,
+    label: MOU_LIFECYCLE_LABELS[value],
+    query: { mou_lifecycle: value },
+  })),
+];
+
+async function fetchMouLifecycleSummaryCounts(pool, query = {}, options = {}) {
+  const countQuery = { ...query };
+  delete countQuery.mou_lifecycle;
+  delete countQuery.status;
+  delete countQuery.page;
+  delete countQuery.limit;
+
+  const { sql, params } = buildProposalListWhere(countQuery, options);
+
+  const [[row]] = await pool.query(
+    `SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN NOT (${INACTIVE_SQL}) AND NOT (${EXECUTION_SQL}) THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN (${INACTIVE_SQL}) AND NOT (${EXECUTION_SQL}) THEN 1 ELSE 0 END) AS inactive,
+      SUM(CASE WHEN (${EXECUTION_SQL}) THEN 1 ELSE 0 END) AS execution
+     ${PROPOSAL_LIST_FROM_SQL}${sql}`,
+    params
+  );
+
+  return {
+    all: Number(row.total) || 0,
+    active: Number(row.active) || 0,
+    inactive: Number(row.inactive) || 0,
+    execution: Number(row.execution) || 0,
+  };
+}
+
 function buildListFiltersEcho(query, options = {}) {
   const scopedSectors =
     options.sectorScopes?.length > 0
@@ -218,4 +257,6 @@ module.exports = {
   validateProposalListQuery,
   buildProposalListWhere,
   buildListFiltersEcho,
+  fetchMouLifecycleSummaryCounts,
+  DASHBOARD_LIST_TAB_FILTERS,
 };

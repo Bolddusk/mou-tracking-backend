@@ -10,7 +10,7 @@ const NAV_PERMISSION_BUNDLES = [
     label: 'All Opportunities',
     route: '/dashboard/super-admin',
     list_apis: [
-      { method: 'GET', path: '/api/proposals/all', permission: 'proposals.list_all', required: true, roles: ['super_admin'] },
+      { method: 'GET', path: '/api/proposals/all', permission: 'proposals.list_all', required: true, roles: ['super_admin', 'admin'] },
       { method: 'GET', path: '/api/proposals/sector-lead', permission: 'proposals.list_sector', required: true, roles: ['sector_lead'] },
       { method: 'GET', path: '/api/proposals/my', permission: 'proposals.list_own', required: true, roles: ['party_a', 'party_b'] },
       { method: 'GET', path: '/api/proposals/filter-options', permission: 'proposals.filter_options', required: true },
@@ -35,6 +35,12 @@ const NAV_PERMISSION_BUNDLES = [
     default_grant_on_nav: {
       by_role: {
         super_admin: [
+          'proposals.list_all',
+          'proposals.filter_options',
+          'proposals.view',
+          'proposals.activities.view',
+        ],
+        admin: [
           'proposals.list_all',
           'proposals.filter_options',
           'proposals.view',

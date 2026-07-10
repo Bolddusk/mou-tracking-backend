@@ -80,10 +80,14 @@ Authorization: Bearer <token>
 
 | UI tab | API call |
 |--------|----------|
-| **All** | `GET /api/proposals/sector-lead?page=1&limit=20` (no `status`) |
-| **Submitted** | `...&status=submitted` |
-| **Approved** | `...&status=approved` |
-| **Rejected** | `...&status=rejected` |
+| **All** | `GET /api/proposals/sector-lead?page=1&limit=20` (no `mou_lifecycle`, no `status`) |
+| **Active** | `...&mou_lifecycle=active` |
+| **Inactive** | `...&mou_lifecycle=inactive` |
+| **Execution** | `...&mou_lifecycle=execution` |
+
+**Removed:** Draft / Submitted / Approved / Rejected dashboard tabs — use MOU lifecycle instead. See `DASHBOARD_LIFECYCLE_TABS_FRONTEND.md`.
+
+Load counts and tab definitions from `GET /api/proposals/filter-options` → `mou_lifecycle_counts`, `dashboard_list_tab_filters`.
 
 **Note:** Old backend defaulted to `submitted` + `resubmitted` only when status was omitted. **New behavior:** omitting `status` returns **all non-draft** proposals in the sector (including approved historic MOUs). Drafts are Party A private until submit — they never appear in the sector lead list.
 

@@ -23,6 +23,8 @@ const {
   validateProposalListQuery,
   buildProposalListWhere,
   buildListFiltersEcho,
+  fetchMouLifecycleSummaryCounts,
+  DASHBOARD_LIST_TAB_FILTERS,
 } = require('../utils/proposalListFilters');
 const { MOU_LIFECYCLE_LABELS } = require('../utils/mouLifecycle');
 const { ensureSectorCache } = require('../utils/sectorRegistry');
@@ -170,6 +172,14 @@ async function getProposalFilterOptions(req, res) {
 
     const sectors = sectorScopes?.length ? sectorScopes : getActiveSectorNames();
     const sifcCategories = (await listActiveSifcCategories()).map((row) => row.name);
+    const staffDashboardRole = ['super_admin', 'admin', 'sector_lead'].includes(req.user.role);
+    const mou_lifecycle_counts = staffDashboardRole
+      ? await fetchMouLifecycleSummaryCounts(pool, {}, {
+          sectorScopes,
+          allowIncludeDeleted:
+            req.user.role === 'super_admin' || req.user.role === 'admin',
+        })
+      : null;
 
     return res.json({
       proposal_statuses: PROPOSAL_STATUSES,
@@ -177,6 +187,9 @@ async function getProposalFilterOptions(req, res) {
         value,
         label: MOU_LIFECYCLE_LABELS[value],
       })),
+      dashboard_list_tab_filters: staffDashboardRole ? DASHBOARD_LIST_TAB_FILTERS : null,
+      dashboard_list_filter_param: staffDashboardRole ? 'mou_lifecycle' : null,
+      mou_lifecycle_counts,
       cooperation_modes: COOPERATION_MODES.map((value) => ({
         value,
         label: COOPERATION_MODE_LABELS[value],
