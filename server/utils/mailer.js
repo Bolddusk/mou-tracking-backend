@@ -3,18 +3,35 @@ const nodemailer = require('nodemailer');
 let transporter = null;
 
 function getEmailPassword() {
-  return process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD || '';
+  return (
+    process.env.EMAIL_PASS ||
+    process.env.EMAIL_PASSWORD ||
+    process.env.SMTP_PASS ||
+    ''
+  );
+}
+
+function getSmtpHost() {
+  return process.env.EMAIL_HOST || process.env.SMTP_HOST || '';
+}
+
+function getSmtpPort() {
+  return process.env.EMAIL_PORT || process.env.SMTP_PORT || '587';
+}
+
+function getSmtpUser() {
+  return process.env.EMAIL_USER || process.env.SMTP_USER || '';
 }
 
 function isEmailEnabled() {
   if (process.env.EMAIL_ENABLED === 'false') return false;
-  const { EMAIL_HOST, EMAIL_USER } = process.env;
-  return Boolean(EMAIL_HOST && EMAIL_USER && getEmailPassword());
+  return Boolean(getSmtpHost() && getSmtpUser() && getEmailPassword());
 }
 
 function getFromAddress() {
   if (process.env.EMAIL_FROM) return process.env.EMAIL_FROM;
-  const user = process.env.EMAIL_USER;
+  if (process.env.SMTP_FROM) return process.env.SMTP_FROM;
+  const user = getSmtpUser();
   const name = process.env.EMAIL_FROM_NAME;
   if (name && user) return `${name} <${user}>`;
   return user;
@@ -27,18 +44,19 @@ function getTransporter() {
     return null;
   }
 
-  const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER } = process.env;
+  const port = Number(getSmtpPort()) || 587;
   const secure =
     process.env.EMAIL_SECURE === 'true' ||
+    process.env.SMTP_SECURE === 'true' ||
     process.env.EMAIL_ENCRYPTION === 'ssl' ||
-    Number(EMAIL_PORT) === 465;
+    port === 465;
 
   transporter = nodemailer.createTransport({
-    host: EMAIL_HOST,
-    port: Number(EMAIL_PORT) || 587,
+    host: getSmtpHost(),
+    port,
     secure,
     auth: {
-      user: EMAIL_USER,
+      user: getSmtpUser(),
       pass: getEmailPassword(),
     },
   });

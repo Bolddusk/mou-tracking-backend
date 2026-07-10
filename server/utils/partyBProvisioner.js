@@ -87,6 +87,17 @@ async function provisionPartyBForProposal(proposal) {
       result.credentials = buildCredentialsPayload(email, rawPassword);
     }
 
+    const { isEmailEnabled } = require('./mailer');
+    if (!isEmailEnabled()) {
+      result.email_sent = false;
+      result.email_skipped = true;
+      result.email_error = null;
+      if (!result.credentials) {
+        result.credentials = buildCredentialsPayload(email, rawPassword);
+      }
+      return result;
+    }
+
     try {
       await sendPartyBInviteEmail({
         partyBName: contactName,
