@@ -3,7 +3,14 @@ const pool = require('../config/db');
 const MAX_MESSAGE_LENGTH = 2000;
 const DEFAULT_HISTORY_LIMIT = 100;
 const MAX_HISTORY_LIMIT = 200;
-const ALLOWED_SENDER_ROLES = new Set(['party_a', 'party_b', 'sector_lead', 'super_admin']);
+  const ALLOWED_SENDER_ROLES = new Set([
+    'party_a',
+    'party_b',
+    'investor',
+    'sector_lead',
+    'super_admin',
+    'admin',
+  ]);
 
 function formatChatMessage(row) {
   return {

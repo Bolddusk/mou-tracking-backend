@@ -102,6 +102,7 @@ function initProposalChat(httpServer) {
           online: presencePayload(roomUsers.get(room)),
           messages,
           canSend: access.canSend !== false,
+          party_b_linked: Boolean(proposal.party_b_user_id),
         });
 
         socket.to(room).emit('chat:presence', {

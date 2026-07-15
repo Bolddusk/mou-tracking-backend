@@ -30,7 +30,14 @@ const { getProposalChatMessages } = require('../controllers/proposalChatControll
 const { exportProposalReport } = require('../controllers/proposalReportController');
 const { getConferenceReport } = require('../controllers/conferenceReportController');
 const { getProposalSifcReport } = require('../controllers/proposalSifcReportController');
-const { getProposalMou, saveProposalMou, getProposalMouStatus, acknowledgeProposalMou, getProposalMouVersions } = require('../controllers/proposalMouController');
+const {
+  getProposalMou,
+  saveProposalMou,
+  deleteProposalMou,
+  getProposalMouStatus,
+  acknowledgeProposalMou,
+  getProposalMouVersions,
+} = require('../controllers/proposalMouController');
 const { closeProposalDeal } = require('../controllers/dealCloseController');
 const { updateProposalPartyContacts } = require('../controllers/proposalPartyContactController');
 const {
@@ -177,6 +184,7 @@ router.get('/:id/mou/versions', ...mouStatusViewRoles, getProposalMouVersions);
 router.patch('/:id/mou/acknowledge', ...mouAckRoles, acknowledgeProposalMou);
 router.get('/:id/mou', ...mouViewRoles, getProposalMou);
 router.patch('/:id/mou', ...mouUploadRoles, proposalUpload, handleUploadError, saveProposalMou);
+router.delete('/:id/mou', ...mouUploadRoles, deleteProposalMou);
 
 // Detail — party_a (own), sector_lead, super_admin
 router.get('/:id', ...proposalViewRoles, getProposalDetail);

@@ -4,11 +4,14 @@
 **Socket path:** `/socket.io`  
 **Auth:** JWT from login (`party_a`, `party_b`, `sector_lead`, `super_admin`, or `regional_focal_point` read-only)
 
-After a proposal is **approved** and Party B is linked (`party_b_user_id`), Party A and Party B can chat in real time over **Socket.io**.
+After a proposal is **approved**, linked participants can chat in real time over **Socket.io**.
+Party B does **not** need to be linked first — Party A, Sector Lead, and Super Admin can message; Party B joins when `party_b_user_id` is set.
 
 **Messages are saved in MySQL** — users can see old chat after refresh. Real-time delivery is still via Socket.io; history is loaded on join and via REST.
 
-Use the **Activity Timeline** for formal milestones — chat is informal messaging between the two parties.
+Use the **Activity Timeline** for formal milestones — chat is informal messaging between parties / staff.
+
+Also see: `CHAT_WITHOUT_PARTY_B_FRONTEND.md`
 
 ---
 
@@ -17,17 +20,17 @@ Use the **Activity Timeline** for formal milestones — chat is informal messagi
 | Condition | Required |
 |-----------|----------|
 | Proposal `status` | `approved` |
-| `party_b_user_id` | Set (happens on sector-lead approve) |
-| Logged-in user | See participants table below |
+| Logged-in user | Linked to that role on this proposal (see table) |
+| `party_b_user_id` | Only required for **Party B** to participate |
 
 ### Participants
 
 | Role | Access | Send messages? |
 |------|--------|----------------|
-| `party_a` | Owns the proposal (`party_a_id`) | Yes |
-| `party_b` | Linked to proposal (`party_b_user_id`) | Yes |
+| `party_a` | Owns the proposal (`party_a_id`) | Yes (even if Party B not linked) |
+| `party_b` | Linked to proposal (`party_b_user_id`) | Yes — only after link |
 | `sector_lead` | Proposal `sector` matches lead's sector | Yes |
-| `super_admin` | Any approved proposal | Yes |
+| `super_admin` / `admin` | Any approved proposal | Yes |
 | `regional_focal_point` | Approved matchmaking engagement they created (`mm_matches.proposed_by_rfp`) | **No — read-only** |
 
 `canSend: false` for RFP on REST (`GET /messages`) and socket (`chat:joined`). Hide message input in UI.

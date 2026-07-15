@@ -48,7 +48,6 @@ const EXECUTIVE_SUMMARY_KEYS = [
   'sifc_category',
   'mou_operational_status',
   'current_status',
-  'progress',
   'bottlenecks',
   'tentative_timeline',
   'action_taken',
@@ -59,6 +58,9 @@ const EXECUTIVE_SUMMARY_KEYS = [
   'source_sr_no',
   'source_seq',
 ];
+
+/** Progress is updated only via Progress tab — not Edit MOU fields. */
+const READ_ONLY_EXECUTIVE_SUMMARY_KEYS = new Set(['progress']);
 
 const ADMIN_ONLY_SCALAR_FIELDS = new Set(['external_reference', 'sector']);
 
@@ -214,13 +216,19 @@ function buildProposalFieldUpdates(body, existingRow, user) {
   for (const field of JSON_FIELDS) {
     if (sanitizedBody[field] !== undefined) {
       let patch = sanitizedBody[field];
-      if (field === 'executive_summary' && patch && typeof patch === 'object' && patch.sifc_category !== undefined) {
-        const category = String(patch.sifc_category || '').trim();
-        if (category && !isValidActiveSifcCategory(category)) {
-          return {
-            error: 'Invalid sifc_category — choose from active SIFC categories list',
-            status: 400,
-          };
+      if (field === 'executive_summary' && patch && typeof patch === 'object' && !Array.isArray(patch)) {
+        patch = { ...patch };
+        READ_ONLY_EXECUTIVE_SUMMARY_KEYS.forEach((key) => {
+          delete patch[key];
+        });
+        if (patch.sifc_category !== undefined) {
+          const category = String(patch.sifc_category || '').trim();
+          if (category && !isValidActiveSifcCategory(category)) {
+            return {
+              error: 'Invalid sifc_category — choose from active SIFC categories list',
+              status: 400,
+            };
+          }
         }
       }
 
@@ -248,6 +256,7 @@ function getEditableFieldCatalog() {
     ].filter((f) => !READ_ONLY_SYSTEM_FIELDS.has(f) && !READ_ONLY_LOOKUP_SCALAR_FIELDS.has(f)),
     json_fields: JSON_FIELDS,
     executive_summary_keys: EXECUTIVE_SUMMARY_KEYS,
+    read_only_executive_summary_keys: [...READ_ONLY_EXECUTIVE_SUMMARY_KEYS],
     excluded_party_a_info_keys: [...EXCLUDED_PARTY_A_INFO_KEYS],
     lookup_fields: {
       conference_key: {
@@ -282,6 +291,7 @@ module.exports = {
   getEditableFieldCatalog,
   canChangeProposalSector,
   EXECUTIVE_SUMMARY_KEYS,
+  READ_ONLY_EXECUTIVE_SUMMARY_KEYS,
   READ_ONLY_SYSTEM_FIELDS,
   EXCLUDED_PARTY_A_INFO_KEYS,
   ADMIN_ONLY_SCALAR_FIELDS,

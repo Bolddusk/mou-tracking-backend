@@ -64,6 +64,7 @@ function formatMouResponse(proposal, capabilities = null) {
       ? {
           can_view_mou: capabilities.can_view_mou,
           can_upload_mou: capabilities.can_upload_mou,
+          can_delete_mou: capabilities.can_delete_mou,
           can_edit_mou_fields: capabilities.can_edit_mou_fields,
         }
       : undefined,
@@ -447,6 +448,77 @@ async function acknowledgeProposalMou(req, res) {
   }
 }
 
+async function deleteProposalMou(req, res) {
+  try {
+    if (req.user.role === 'regional_focal_point') {
+      return res.status(403).json({ error: 'Regional Focal Point has read-only access to MOU' });
+    }
+
+    const proposal = await getProposalRow(req.params.id);
+    const access = await checkProposalAccess(req, proposal);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const caps = buildProposalCapabilities(req, proposal, access, await loadUserPermissions(req.user));
+    if (!caps.can_delete_mou) {
+      if (!caps.can_upload_mou) {
+        return res.status(403).json({ error: 'You cannot delete MOU on this opportunity' });
+      }
+      return res.status(400).json({ error: 'No MOU file to delete' });
+    }
+
+    if (isProposalLocked(proposal)) {
+      return res.status(400).json({ error: PROPOSAL_LOCKED_ERROR });
+    }
+
+    const nextStatus = proposal.mou_scope ? 'in_progress' : 'not_started';
+    const beforeUrl = proposal.mou_file_url;
+
+    await pool.query(
+      `UPDATE proposals SET
+         mou_file_url = NULL,
+         mou_uploaded_at = NULL,
+         mou_uploaded_by = NULL,
+         mou_status = ?,
+         mou_ack_by_a = FALSE,
+         mou_ack_by_a_at = NULL,
+         mou_ack_by_b = FALSE,
+         mou_ack_by_b_at = NULL
+       WHERE id = ?`,
+      [nextStatus, req.params.id]
+    );
+
+    await logProposalAction({
+      proposalId: req.params.id,
+      user: req.user,
+      action: 'mou_file_deleted',
+      changes: [
+        { field: 'mou_file_url', old_value: beforeUrl, new_value: null },
+        { field: 'mou_status', old_value: proposal.mou_status, new_value: nextStatus },
+      ],
+      summary: 'MOU file removed',
+    });
+
+    const updated = await getProposalRow(req.params.id);
+    const updatedCaps = buildProposalCapabilities(
+      req,
+      updated,
+      access,
+      await loadUserPermissions(req.user)
+    );
+
+    return res.json({
+      message: 'MOU file deleted successfully',
+      ...formatMouResponse(updated, updatedCaps),
+      proposal: enrichProposalRow(updated),
+    });
+  } catch (err) {
+    console.error('Delete proposal MOU error:', err.message);
+    return res.status(500).json({ error: 'Failed to delete MOU file' });
+  }
+}
+
 async function getProposalMouVersions(req, res) {
   try {
     const proposal = await getProposalRow(req.params.id);
@@ -479,6 +551,7 @@ async function getProposalMouVersions(req, res) {
 module.exports = {
   getProposalMou,
   saveProposalMou,
+  deleteProposalMou,
   getProposalMouStatus,
   acknowledgeProposalMou,
   getProposalMouVersions,

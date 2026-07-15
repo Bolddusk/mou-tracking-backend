@@ -369,7 +369,6 @@ function validateSubmit(proposal) {
     { key: 'party_b_entity_type', label: 'Party B Entity Type' },
     { key: 'sector', label: 'Sector' },
     { key: 'company_name', label: 'Company Name' },
-    { key: 'project_type', label: 'Project Type' },
     { key: 'venture_name', label: 'Venture Name' },
     { key: 'party_b_name', label: 'Party B Full Name' },
     { key: 'party_b_organization', label: 'Party B Organization' },
@@ -501,7 +500,6 @@ function validatePartyAOnlySubmit(proposal) {
     { key: 'engagement_type', label: 'Engagement Type (G2G/B2B/B2G/G2B)' },
     { key: 'sector', label: 'Sector' },
     { key: 'company_name', label: 'Company Name' },
-    { key: 'project_type', label: 'Project Type' },
     { key: 'venture_name', label: 'Venture Name' },
   ];
 
@@ -695,7 +693,6 @@ function validateChinaProposalSubmit(proposal) {
     { key: 'engagement_type', label: 'Engagement Type (G2G/B2B/B2G/G2B)' },
     { key: 'sector', label: 'Sector' },
     { key: 'company_name', label: 'Company Name' },
-    { key: 'project_type', label: 'Project Type' },
     { key: 'venture_name', label: 'Venture Name' },
     { key: 'party_b_entity_type', label: 'Chinese Party — Entity Type' },
     { key: 'party_b_name', label: 'Chinese Party — Full Name' },

@@ -161,51 +161,23 @@ async function checkApprovedPartyChatAccess(user, proposal) {
     return { error: 'Chat is only available after proposal approval', status: 403 };
   }
 
-  if (!proposal.party_b_user_id) {
-    if (isHistoricExemptProposal(proposal)) {
-      if (user.role === 'super_admin') {
-        return { ok: true, proposal, canSend: true };
-      }
-
-      if (user.role === 'sector_lead') {
-        if (!sectorLeadHasAnySector(user)) {
-          return { error: 'Sector lead profile has no sector assigned', status: 400 };
-        }
-        if (sectorLeadCoversSector(user, proposal.sector)) {
-          return { ok: true, proposal, canSend: true };
-        }
-        return { error: 'Access denied — proposal is outside your sector', status: 403 };
-      }
-
-      if (user.role === 'party_a' && proposal.party_a_id === user.id) {
-        return { ok: true, proposal, canSend: true };
-      }
-
-      if (['regional_focal_point', 'focal_point'].includes(user.role)) {
-        const allowed = await isMatchEngagementStakeholder(user.id, proposal.id);
-        if (allowed) {
-          return { ok: true, proposal, canSend: false };
-        }
-      }
-    }
-
-    return { error: 'Party B is not linked to this proposal yet', status: 403 };
-  }
+  // Anyone already linked / staff can chat. Party B joins when party_b_user_id is set.
+  const partyBLinked = Boolean(proposal.party_b_user_id);
 
   if (user.role === 'party_a' && proposal.party_a_id === user.id) {
-    return { ok: true, proposal, canSend: true };
+    return { ok: true, proposal, canSend: true, partyBLinked };
   }
 
-  if (user.role === 'party_b' && proposal.party_b_user_id === user.id) {
-    return { ok: true, proposal, canSend: true };
+  if (partyBLinked && user.role === 'party_b' && proposal.party_b_user_id === user.id) {
+    return { ok: true, proposal, canSend: true, partyBLinked };
   }
 
-  if (user.role === 'investor' && proposal.party_b_user_id === user.id) {
-    return { ok: true, proposal, canSend: true };
+  if (partyBLinked && user.role === 'investor' && proposal.party_b_user_id === user.id) {
+    return { ok: true, proposal, canSend: true, partyBLinked };
   }
 
-  if (user.role === 'super_admin') {
-    return { ok: true, proposal, canSend: true };
+  if (user.role === 'super_admin' || user.role === 'admin') {
+    return { ok: true, proposal, canSend: true, partyBLinked };
   }
 
   if (user.role === 'sector_lead') {
@@ -213,11 +185,11 @@ async function checkApprovedPartyChatAccess(user, proposal) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
     if (sectorLeadCoversSector(user, proposal.sector)) {
-      return { ok: true, proposal, canSend: true };
+      return { ok: true, proposal, canSend: true, partyBLinked };
     }
     const match = await getMatchForEngagement(proposal.id);
     if (match && match.matched_by === user.id) {
-      return { ok: true, proposal, canSend: true };
+      return { ok: true, proposal, canSend: true, partyBLinked };
     }
     return { error: 'Access denied — proposal is outside your sector', status: 403 };
   }
@@ -227,7 +199,11 @@ async function checkApprovedPartyChatAccess(user, proposal) {
     if (!allowed) {
       return { error: 'Access denied', status: 403 };
     }
-    return { ok: true, proposal, canSend: false };
+    return { ok: true, proposal, canSend: false, partyBLinked };
+  }
+
+  if (!partyBLinked && (user.role === 'party_b' || user.role === 'investor')) {
+    return { error: 'Your account is not linked to this proposal yet', status: 403 };
   }
 
   return { error: 'Access denied', status: 403 };
@@ -253,6 +229,7 @@ function canEditMouTextFields(req, proposal) {
 
 function applyMouFieldCapabilities(req, proposal, caps) {
   caps.can_edit_mou_fields = canEditMouTextFields(req, proposal);
+  caps.can_delete_mou = Boolean(caps.can_upload_mou && proposal?.mou_file_url);
   return caps;
 }
 
@@ -261,11 +238,8 @@ function isHistoricExemptProposal(proposal) {
 }
 
 function chatReady(proposal) {
-  if (proposal.status !== 'approved') return false;
-  if (proposal.party_b_user_id) return true;
-  if (isHistoricExemptProposal(proposal)) return true;
-  return false;
-}
+  // Approved MOUs can open chat for linked Party A + staff; Party B when linked.
+  return proposal.status === 'approved';}
 
 function buildProposalCapabilities(req, proposal, access, userPermissions = null) {
   const caps = {
@@ -273,6 +247,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     can_send_chat: false,
     can_add_activity: false,
     can_upload_mou: false,
+    can_delete_mou: false,
     can_edit_mou_fields: false,
     can_view_mou: false,
     can_close_deal: false,

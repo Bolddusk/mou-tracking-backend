@@ -216,7 +216,6 @@ function validateMmSideASubmit(proposal) {
     { key: 'engagement_type', label: 'Engagement Type (G2G/B2B/B2G/G2B)' },
     { key: 'sector', label: 'Sector' },
     { key: 'company_name', label: 'Company Name' },
-    { key: 'project_type', label: 'Project Type' },
     { key: 'venture_name', label: 'Venture Name' },
   ];
 
@@ -350,7 +349,6 @@ function validateMmSideBSubmit(proposal) {
     { key: 'engagement_type', label: 'Engagement Type (G2G/B2B/B2G/G2B)' },
     { key: 'sector', label: 'Sector' },
     { key: 'company_name', label: 'Company Name' },
-    { key: 'project_type', label: 'Project Type' },
     { key: 'venture_name', label: 'Venture Name' },
   ];
 

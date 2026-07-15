@@ -91,6 +91,7 @@ const ACTION_LABELS = {
   party_contacts_updated: 'Party contacts updated',
   mou_updated: 'MOU updated',
   mou_file_uploaded: 'MOU file uploaded',
+  mou_file_deleted: 'MOU file deleted',
   mou_acknowledged: 'MOU acknowledged',
   approved: 'Approved by sector lead',
   rejected: 'Rejected by sector lead',
