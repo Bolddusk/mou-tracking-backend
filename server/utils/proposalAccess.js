@@ -241,6 +241,14 @@ function chatReady(proposal) {
   // Approved MOUs can open chat for linked Party A + staff; Party B when linked.
   return proposal.status === 'approved';}
 
+function canDeleteProposal(user, proposal) {
+  if (!proposal || !user) return false;
+  if (!['draft', 'rejected'].includes(proposal.status)) return false;
+  if (user.role === 'super_admin' || user.role === 'admin') return true;
+  if (user.role === 'party_a' && Number(proposal.party_a_id) === Number(user.id)) return true;
+  return false;
+}
+
 function buildProposalCapabilities(req, proposal, access, userPermissions = null) {
   const caps = {
     can_view_chat: false,
@@ -248,6 +256,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     can_add_activity: false,
     can_upload_mou: false,
     can_delete_mou: false,
+    can_delete: false,
     can_edit_mou_fields: false,
     can_view_mou: false,
     can_close_deal: false,
@@ -258,6 +267,8 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
   };
 
   if (!access.ok) return caps;
+
+  caps.can_delete = canDeleteProposal(req.user, proposal);
 
   const editAccess = canEditProposalFields(req, proposal, access);
   caps.can_edit_fields = editAccess.ok;
@@ -370,6 +381,7 @@ module.exports = {
   checkProposalAccess,
   canEditProposalFields,
   canEditMouTextFields,
+  canDeleteProposal,
   checkApprovedPartyChatAccess,
   isProposalOwnerForActivities,
   hasRfpApprovedMatchAccess,

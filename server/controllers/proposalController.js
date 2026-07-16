@@ -14,7 +14,7 @@ async function getOwnedProposal(proposalId, user) {
   const [rows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [proposalId]);
   const proposal = rows[0] || null;
   if (!proposal) return null;
-  if (user.role === 'super_admin') return proposal;
+  if (user.role === 'super_admin' || user.role === 'admin') return proposal;
   if (proposal.party_a_id === user.id) return proposal;
   return null;
 }

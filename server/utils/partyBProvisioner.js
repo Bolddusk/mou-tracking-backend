@@ -5,7 +5,6 @@ const { sendPartyBInviteEmail } = require('./mailer');
 const {
   shouldReturnCredentialsInResponse,
   buildCredentialsPayload,
-  setTemporaryPassword,
 } = require('./partyBCredentials');
 const { buildPartyBInfoFromRow } = require('./partyBInfo');
 
@@ -49,12 +48,14 @@ async function provisionPartyBForProposal(proposal) {
   const existing = await findUserByEmail(email);
 
   if (existing) {
+    // Existing account: only link to this MOU — do not reset password or re-send credentials
     userId = existing.id;
     result.linked = true;
     result.user_id = userId;
     result.existing_account = true;
-    rawPassword = generatePassword();
-    await setTemporaryPassword(userId, rawPassword);
+    result.account_created = false;
+    result.credentials = null;
+    result.email_sent = false;
   } else {
     rawPassword = generatePassword();
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
@@ -82,7 +83,8 @@ async function provisionPartyBForProposal(proposal) {
     proposal.id,
   ]);
 
-  if (rawPassword) {
+  // Invite email + credentials only for newly created accounts
+  if (result.account_created && rawPassword) {
     if (shouldReturnCredentialsInResponse()) {
       result.credentials = buildCredentialsPayload(email, rawPassword);
     }

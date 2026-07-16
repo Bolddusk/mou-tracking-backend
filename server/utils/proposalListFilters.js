@@ -201,13 +201,19 @@ async function fetchMouLifecycleSummaryCounts(pool, query = {}, options = {}) {
 
   const { sql, params } = buildProposalListWhere(countQuery, options);
 
+  // Dashboard Total / Active / Inactive / Execution — only approved (or completed) MOUs
+  const approvedOnly = "p.status IN ('approved', 'completed')";
+  const whereSql = sql
+    ? `${sql} AND ${approvedOnly}`
+    : ` WHERE ${approvedOnly}`;
+
   const [[row]] = await pool.query(
     `SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN NOT (${INACTIVE_SQL}) AND NOT (${EXECUTION_SQL}) THEN 1 ELSE 0 END) AS active,
       SUM(CASE WHEN (${INACTIVE_SQL}) AND NOT (${EXECUTION_SQL}) THEN 1 ELSE 0 END) AS inactive,
       SUM(CASE WHEN (${EXECUTION_SQL}) THEN 1 ELSE 0 END) AS execution
-     ${PROPOSAL_LIST_FROM_SQL}${sql}`,
+     ${PROPOSAL_LIST_FROM_SQL}${whereSql}`,
     params
   );
 

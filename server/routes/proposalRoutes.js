@@ -57,7 +57,8 @@ const {
 
 const router = express.Router();
 
-const proposalAuthorRoles = [verifyToken, requireRole('party_a', 'super_admin')];
+const proposalAuthorRoles = [verifyToken, requireRole('party_a', 'super_admin', 'admin')];
+const proposalDeleteRoles = [verifyToken, requireRole('party_a', 'super_admin', 'admin')];
 const partyMyProposals = [verifyToken, requireAnyPermission('proposals.list_own', 'proposals.view_own')];
 const sectorLeadList = [
   verifyToken,
@@ -133,7 +134,7 @@ router.post('/submit', ...proposalAuthorRoles, submitProposal);
 router.patch('/:id/resubmit', ...partyAResubmit, resubmitProposal);
 router.post('/upload', ...proposalAuthorRoles, proposalUpload, handleUploadError, uploadFile);
 router.get('/my', ...partyMyProposals, getMyProposals);
-router.delete('/:id', ...proposalAuthorRoles, deleteProposal);
+router.delete('/:id', ...proposalDeleteRoles, deleteProposal);
 
 // Sector Lead / permission-scoped list
 router.get('/sector-lead', ...sectorLeadList, getSectorLeadProposals);

@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { checkProposalAccess, buildProposalCapabilities } = require('../utils/proposalAccess');
+const { checkProposalAccess, buildProposalCapabilities, canDeleteProposal } = require('../utils/proposalAccess');
 const { canChangeProposalSector } = require('../utils/proposalFieldEdit');
 const { canArchiveProposals, isProposalArchived } = require('../utils/proposalSoftDelete');
 const { loadUserPermissions } = require('../utils/rolePermissions');
@@ -98,9 +98,16 @@ async function fetchPaginatedProposalList(req, res, options = {}) {
   const [rows] = await pool.query(dataQuery, [...params, limit, offset]);
   const enriched = enrichProposals(rows);
   const withPoke = await attachPokeStatus(enriched);
+  const data = withPoke.map((row) => ({
+    ...row,
+    capabilities: {
+      ...(row.capabilities || {}),
+      can_delete: canDeleteProposal(req.user, row),
+    },
+  }));
 
   return res.json({
-    data: withPoke,
+    data,
     pagination: {
       page,
       limit,

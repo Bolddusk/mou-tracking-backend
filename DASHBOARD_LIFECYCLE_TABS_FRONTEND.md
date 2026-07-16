@@ -39,9 +39,11 @@ Authorization: Bearer <token>
 }
 ```
 
+**Important:** `mou_lifecycle_counts` counts **only** `status = approved` or `completed`. Draft / submitted / rejected are **not** in TOTAL (or Active / Inactive / Execution).
+
 | Field | Use |
 |-------|-----|
-| `mou_lifecycle_counts` | Top summary cards (Total + Active + Inactive + Execution) |
+| `mou_lifecycle_counts` | Top summary cards (Total + Active + Inactive + Execution) — approved MOUs only |
 | `dashboard_list_tab_filters` | Pill buttons next to search |
 | `dashboard_list_filter_param` | Always `mou_lifecycle` — **not** `status` |
 
