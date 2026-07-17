@@ -188,7 +188,9 @@ function buildProposalFieldUpdates(body, existingRow, user) {
   }
 
   const enriched = enrichProposalRow(existingRow);
-  const updates = { ...buildDraftUpdates(sanitizedBody) };
+  // Partial field PATCH must not run wizard operational sync (it rebuilds executive_summary
+  // from empty defaults and clears Progress / SIFC / Location when only company_name changes).
+  const updates = { ...buildDraftUpdates(sanitizedBody, { skipOperationalSync: true }) };
 
   for (const field of EXTRA_SCALAR_FIELDS) {
     if (sanitizedBody[field] !== undefined) {

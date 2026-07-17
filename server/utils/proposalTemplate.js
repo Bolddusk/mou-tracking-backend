@@ -299,7 +299,7 @@ function sanitizeEnumField(value, allowed) {
   return allowed.includes(trimmed) ? trimmed : undefined;
 }
 
-function buildDraftUpdates(body) {
+function buildDraftUpdates(body, options = {}) {
   const updates = {};
 
   for (const field of SCALAR_DRAFT_FIELDS) {
@@ -355,7 +355,10 @@ function buildDraftUpdates(body) {
     updates.proposal_title = updates.venture_name || updates.company_name || '';
   }
 
-  applyDirectMouOperationalSync(updates, body);
+  // Wizard/draft only — never on PATCH /fields (would wipe Progress / SIFC / etc.)
+  if (!options.skipOperationalSync) {
+    applyDirectMouOperationalSync(updates, body);
+  }
 
   return stringifyJsonFields(updates);
 }

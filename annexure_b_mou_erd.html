@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Annexure B — ERD | MOU Tracking System</title>
+  <style>
+    :root {
+      --ink: #1a2332;
+      --muted: #5a6a7a;
+      --line: #c5d0db;
+      --bg: #f4f7fa;
+      --card: #ffffff;
+      --primary: #1b4d3e;
+      --primary-soft: #e8f2ee;
+      --accent: #2f6fed;
+      --party-a: #1b4d3e;
+      --party-b: #0b6e99;
+      --sl: #8a5a00;
+      --warn: #9a3412;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.45;
+    }
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+    header {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin-bottom: 20px;
+    }
+    header .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 6px;
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 650;
+      color: var(--primary);
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 820px;
+    }
+    .diagram-wrap {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+    svg { display: block; width: 100%; height: auto; min-width: 980px; }
+    .legend {
+      margin-top: 18px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 20px;
+    }
+    .legend h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      color: var(--primary);
+    }
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px 16px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .legend-grid strong { color: var(--ink); }
+    footer {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+    }
+    @media print {
+      body { background: #fff; }
+      .page { max-width: none; padding: 12px; }
+      .diagram-wrap, header, .legend { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="eyebrow">Annexure B — Document 1 of 2</p>
+      <h1>Entity Relationship Diagram (ERD) — MOU Tracking System</h1>
+      <p>
+        Logical data model for core entities used in Direct MOU and engagement workflows:
+        Users, Proposals, Sector Leads, MOU Documents, Activities, Complaints,
+        Engagement Rooms, and Party B profiles. Cardinality notation: 1 / N.
+      </p>
+    </header>
+
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 1080 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MOU Tracking System ERD">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+          </marker>
+          <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#0f172a" flood-opacity="0.08" />
+          </filter>
+          <style>
+            .entity { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; }
+            .entity-header { font: 650 13px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+            .entity-attr { font: 11.5px "Segoe UI", Arial, sans-serif; fill: #334155; }
+            .entity-pk { font: 650 11.5px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+            .entity-fk { font: 11.5px "Segoe UI", Arial, sans-serif; fill: #1d4ed8; }
+            .rel-label { font: 650 11px "Segoe UI", Arial, sans-serif; fill: #475569; }
+            .card { font: 700 11px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+            .title-banner { fill: #1b4d3e; }
+            .hdr-users { fill: #1b4d3e; }
+            .hdr-proposals { fill: #1e3a5f; }
+            .hdr-sl { fill: #8a5a00; }
+            .hdr-mou { fill: #0f766e; }
+            .hdr-act { fill: #4338ca; }
+            .hdr-comp { fill: #9a3412; }
+            .hdr-eng { fill: #0369a1; }
+            .hdr-pb { fill: #0b6e99; }
+            .conn { stroke: #64748b; stroke-width: 1.6; fill: none; }
+          </style>
+        </defs>
+
+        <!-- Title strip -->
+        <rect x="24" y="16" width="1032" height="36" rx="6" class="title-banner" />
+        <text x="540" y="39" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial" font-size="15" font-weight="650">
+          MOU Tracking System — Core Entity Relationships
+        </text>
+
+        <!-- ========== USERS ========== -->
+        <g filter="url(#shadow)">
+          <rect x="420" y="70" width="240" height="148" rx="8" class="entity" />
+          <rect x="420" y="70" width="240" height="28" rx="8" class="hdr-users" />
+          <rect x="420" y="86" width="240" height="12" class="hdr-users" />
+          <text x="540" y="89" text-anchor="middle" class="entity-header">USERS</text>
+          <text x="434" y="112" class="entity-pk">PK  id</text>
+          <text x="434" y="130" class="entity-attr">email, full_name, password</text>
+          <text x="434" y="148" class="entity-attr">role (super_admin | admin |</text>
+          <text x="434" y="164" class="entity-attr">sector_lead | party_a | party_b | …)</text>
+          <text x="434" y="182" class="entity-attr">organization, phone, sector</text>
+          <text x="434" y="200" class="entity-attr">created_at</text>
+        </g>
+
+        <!-- ========== SECTOR LEADS ========== -->
+        <g filter="url(#shadow)">
+          <rect x="40" y="90" width="220" height="120" rx="8" class="entity" />
+          <rect x="40" y="90" width="220" height="28" rx="8" class="hdr-sl" />
+          <rect x="40" y="106" width="220" height="12" class="hdr-sl" />
+          <text x="150" y="109" text-anchor="middle" class="entity-header">SECTOR LEADS</text>
+          <text x="54" y="132" class="entity-pk">PK  id (assignment)</text>
+          <text x="54" y="150" class="entity-fk">FK  user_id → Users</text>
+          <text x="54" y="168" class="entity-attr">sector_name / scopes</text>
+          <text x="54" y="186" class="entity-fk">FK  assigned_by → Users</text>
+          <text x="54" y="204" class="entity-attr">assigned_at</text>
+        </g>
+
+        <!-- ========== PARTY B ========== -->
+        <g filter="url(#shadow)">
+          <rect x="820" y="90" width="220" height="120" rx="8" class="entity" />
+          <rect x="820" y="90" width="220" height="28" rx="8" class="hdr-pb" />
+          <rect x="820" y="106" width="220" height="12" class="hdr-pb" />
+          <text x="930" y="109" text-anchor="middle" class="entity-header">PARTY B</text>
+          <text x="834" y="132" class="entity-pk">PK  user_id</text>
+          <text x="834" y="150" class="entity-fk">FK  user_id → Users</text>
+          <text x="834" y="168" class="entity-attr">profile (org, docs, country)</text>
+          <text x="834" y="186" class="entity-attr">auto-provisioned on approve</text>
+          <text x="834" y="204" class="entity-attr">linked via proposals.party_b_user_id</text>
+        </g>
+
+        <!-- ========== PROPOSALS ========== -->
+        <g filter="url(#shadow)">
+          <rect x="390" y="280" width="300" height="176" rx="8" class="entity" />
+          <rect x="390" y="280" width="300" height="28" rx="8" class="hdr-proposals" />
+          <rect x="390" y="296" width="300" height="12" class="hdr-proposals" />
+          <text x="540" y="299" text-anchor="middle" class="entity-header">PROPOSALS (MOU)</text>
+          <text x="404" y="322" class="entity-pk">PK  id</text>
+          <text x="404" y="340" class="entity-fk">FK  party_a_id → Users</text>
+          <text x="404" y="358" class="entity-fk">FK  party_b_user_id → Users</text>
+          <text x="404" y="376" class="entity-fk">FK  reviewed_by → Users</text>
+          <text x="404" y="394" class="entity-attr">status, sector, company fields</text>
+          <text x="404" y="412" class="entity-attr">mou_file_url, ack flags, deal_closed</text>
+          <text x="404" y="430" class="entity-attr">executive_summary, conference…</text>
+          <text x="404" y="448" class="entity-attr">created_at, submitted_at, reviewed_at</text>
+        </g>
+
+        <!-- ========== MOU DOCUMENTS ========== -->
+        <g filter="url(#shadow)">
+          <rect x="40" y="300" width="230" height="140" rx="8" class="entity" />
+          <rect x="40" y="300" width="230" height="28" rx="8" class="hdr-mou" />
+          <rect x="40" y="316" width="230" height="12" class="hdr-mou" />
+          <text x="155" y="319" text-anchor="middle" class="entity-header">MOU DOCUMENTS</text>
+          <text x="54" y="342" class="entity-pk">PK  id (version)</text>
+          <text x="54" y="360" class="entity-fk">FK  proposal_id → Proposals</text>
+          <text x="54" y="378" class="entity-attr">file_url, version_no</text>
+          <text x="54" y="396" class="entity-fk">FK  uploaded_by → Users</text>
+          <text x="54" y="414" class="entity-attr">uploaded_at, ack_by_a / ack_by_b</text>
+          <text x="54" y="432" class="entity-attr">(mou_file_versions + proposal MOU)</text>
+        </g>
+
+        <!-- ========== ACTIVITIES ========== -->
+        <g filter="url(#shadow)">
+          <rect x="810" y="300" width="230" height="140" rx="8" class="entity" />
+          <rect x="810" y="300" width="230" height="28" rx="8" class="hdr-act" />
+          <rect x="810" y="316" width="230" height="12" class="hdr-act" />
+          <text x="925" y="319" text-anchor="middle" class="entity-header">ACTIVITIES</text>
+          <text x="824" y="342" class="entity-pk">PK  id</text>
+          <text x="824" y="360" class="entity-fk">FK  proposal_id → Proposals</text>
+          <text x="824" y="378" class="entity-fk">FK  added_by → Users</text>
+          <text x="824" y="396" class="entity-attr">title, description, activity_date</text>
+          <text x="824" y="414" class="entity-attr">source (manual | mou_field_sync)</text>
+          <text x="824" y="432" class="entity-attr">progress / update-request rows</text>
+        </g>
+
+        <!-- ========== COMPLAINTS ========== -->
+        <g filter="url(#shadow)">
+          <rect x="160" y="520" width="250" height="140" rx="8" class="entity" />
+          <rect x="160" y="520" width="250" height="28" rx="8" class="hdr-comp" />
+          <rect x="160" y="536" width="250" height="12" class="hdr-comp" />
+          <text x="285" y="539" text-anchor="middle" class="entity-header">COMPLAINTS</text>
+          <text x="174" y="562" class="entity-pk">PK  id</text>
+          <text x="174" y="580" class="entity-fk">FK  proposal_id → Proposals</text>
+          <text x="174" y="598" class="entity-fk">FK  filed_by → Users</text>
+          <text x="174" y="616" class="entity-fk">FK  tagged_sector_lead → Users</text>
+          <text x="174" y="634" class="entity-attr">status, subject, description</text>
+          <text x="174" y="652" class="entity-attr">comments / actions (child tables)</text>
+        </g>
+
+        <!-- ========== ENGAGEMENT ROOMS ========== -->
+        <g filter="url(#shadow)">
+          <rect x="670" y="520" width="270" height="140" rx="8" class="entity" />
+          <rect x="670" y="520" width="270" height="28" rx="8" class="hdr-eng" />
+          <rect x="670" y="536" width="270" height="12" class="hdr-eng" />
+          <text x="805" y="539" text-anchor="middle" class="entity-header">ENGAGEMENT ROOMS</text>
+          <text x="684" y="562" class="entity-pk">PK  message id / room = proposal</text>
+          <text x="684" y="580" class="entity-fk">FK  proposal_id → Proposals</text>
+          <text x="684" y="598" class="entity-fk">FK  sender_id → Users</text>
+          <text x="684" y="616" class="entity-attr">chat messages (Party A / B / SL / SA)</text>
+          <text x="684" y="634" class="entity-attr">opens after MOU approved</text>
+          <text x="684" y="652" class="entity-attr">matchmaking engagement → proposal</text>
+        </g>
+
+        <!-- ===== CONNECTIONS ===== -->
+
+        <!-- Users ↔ Sector Leads -->
+        <path class="conn" d="M420 140 H270" marker-end="url(#arrow)" />
+        <text class="card" x="330" y="132">1</text>
+        <text class="card" x="280" y="132">N</text>
+        <text class="rel-label" x="300" y="152">assigned as</text>
+
+        <!-- Users ↔ Party B -->
+        <path class="conn" d="M660 140 H820" marker-end="url(#arrow)" />
+        <text class="card" x="700" y="132">1</text>
+        <text class="card" x="800" y="132">0..1</text>
+        <text class="rel-label" x="720" y="152">has profile</text>
+
+        <!-- Users → Proposals (party_a) -->
+        <path class="conn" d="M500 218 V280" marker-end="url(#arrow)" />
+        <text class="card" x="508" y="248">1</text>
+        <text class="card" x="508" y="272">N</text>
+        <text class="rel-label" x="520" y="255">submits (Party A)</text>
+
+        <!-- Party B → Proposals -->
+        <path class="conn" d="M860 210 V280 H690" marker-end="url(#arrow)" />
+        <text class="card" x="868" y="250">1</text>
+        <text class="card" x="700" y="272">N</text>
+        <text class="rel-label" x="760" y="248">linked Party B</text>
+
+        <!-- Sector Lead reviews Proposals (logical) -->
+        <path class="conn" d="M150 210 V260 H390" marker-end="url(#arrow)" />
+        <text class="card" x="158" y="240">1</text>
+        <text class="card" x="370" y="252">N</text>
+        <text class="rel-label" x="200" y="248">reviews by sector</text>
+
+        <!-- Proposals → MOU Documents -->
+        <path class="conn" d="M390 360 H270" marker-end="url(#arrow)" />
+        <text class="card" x="350" y="352">1</text>
+        <text class="card" x="280" y="352">N</text>
+        <text class="rel-label" x="290" y="378">has versions</text>
+
+        <!-- Proposals → Activities -->
+        <path class="conn" d="M690 360 H810" marker-end="url(#arrow)" />
+        <text class="card" x="720" y="352">1</text>
+        <text class="card" x="790" y="352">N</text>
+        <text class="rel-label" x="730" y="378">logs progress</text>
+
+        <!-- Proposals → Complaints -->
+        <path class="conn" d="M480 456 V520" marker-end="url(#arrow)" />
+        <text class="card" x="488" y="488">1</text>
+        <text class="card" x="488" y="512">0..N</text>
+        <text class="rel-label" x="500" y="500">may raise</text>
+
+        <!-- Proposals → Engagement Rooms -->
+        <path class="conn" d="M600 456 V520" marker-end="url(#arrow)" />
+        <text class="card" x="608" y="488">1</text>
+        <text class="card" x="608" y="512">1</text>
+        <text class="rel-label" x="620" y="500">hosts room</text>
+
+        <!-- Users → Activities (added_by) dashed style via opacity -->
+        <path class="conn" d="M640 160 C780 160, 900 200, 925 300" marker-end="url(#arrow)" stroke-dasharray="4 3" />
+        <text class="rel-label" x="860" y="220">creates</text>
+        <text class="card" x="900" y="235">1:N</text>
+
+        <!-- Users → Complaints filed_by -->
+        <path class="conn" d="M420 200 C300 260, 250 420, 285 520" marker-end="url(#arrow)" stroke-dasharray="4 3" />
+        <text class="rel-label" x="250" y="400">files</text>
+        <text class="card" x="250" y="416">1:N</text>
+
+        <!-- Users → Engagement messages -->
+        <path class="conn" d="M660 200 C780 280, 820 420, 805 520" marker-end="url(#arrow)" stroke-dasharray="4 3" />
+        <text class="rel-label" x="820" y="430">posts in</text>
+        <text class="card" x="820" y="446">1:N</text>
+      </svg>
+    </div>
+
+    <div class="legend">
+      <h2>Cardinality &amp; relationship notes</h2>
+      <div class="legend-grid">
+        <div><strong>Users 1 — N Proposals</strong> — Party A owns / submits many MOUs</div>
+        <div><strong>Users 1 — 0..1 Party B</strong> — optional Party B profile row</div>
+        <div><strong>Users 1 — N Sector Leads</strong> — sector assignment scopes</div>
+        <div><strong>Proposals 1 — N MOU Documents</strong> — file versions over time</div>
+        <div><strong>Proposals 1 — N Activities</strong> — Progress / update requests</div>
+        <div><strong>Proposals 1 — 0..N Complaints</strong> — optional dispute records</div>
+        <div><strong>Proposals 1 — 1 Engagement Room</strong> — chat scoped to approved MOU</div>
+        <div><strong>Party B 1 — N Proposals</strong> — one account may link to many MOUs</div>
+        <div><strong>Solid lines</strong> — primary ownership / FK</div>
+        <div><strong>Dashed lines</strong> — actor participation (filed_by, added_by, sender)</div>
+      </div>
+    </div>
+
+    <footer>Annexure B · MOU Tracking System · ERD</footer>
+  </div>
+</body>
+</html>

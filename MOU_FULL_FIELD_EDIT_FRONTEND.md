@@ -56,6 +56,9 @@ UI:
 
 **Body:** koi bhi subset of detail fields (nested JSON merge hota hai):
 
+> **Important:** Sirf **changed** fields bhejo. Poora form empty/blank values ke saath mat bhejo — blank `executive_summary.progress` / `sifc_category` / `location` existing data overwrite kar sakte hain.
+> `progress` Edit MOU fields se update **nahi** hota (Progress tab use karo).
+
 ```json
 {
   "sector": "Fruits & Vegetables (Production, Cultivation, Processing, Exports)",
