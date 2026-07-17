@@ -434,8 +434,21 @@ DELETE /api/activities/:activityId
 **Response:**
 
 ```json
-{ "message": "Progress entry deleted successfully", "id": 12 }
+{
+  "message": "Progress entry deleted successfully",
+  "id": 12,
+  "mou_sync": {
+    "synced": true,
+    "applied_fields": { "executive_summary.progress": "" },
+    "mou_fields": { "progress": "" },
+    "restored_from_activity_id": null
+  }
+}
 ```
+
+After delete, backend sets Details/banner **Progress** to the **latest remaining** Progress-tab entry. If none left → empty (`""` / show `—`).
+
+Use `mou_sync.mou_fields.progress` (or refetch `GET /api/proposals/:id`) so the header/Details Progress updates immediately.
 
 ### Row flags (per item in list)
 

@@ -260,7 +260,10 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     can_edit_mou_fields: false,
     can_view_mou: false,
     can_close_deal: false,
+    can_view_companies: false,
     can_edit_party_contacts: false,
+    can_edit_party_a_contacts: false,
+    can_edit_party_b_contacts: false,
     can_edit_fields: false,
     can_approve: false,
     can_reject: false,
@@ -300,6 +303,11 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_add_activity = approvedAndOpen;
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
+    caps.can_view_companies = true;
+    // Party A may edit own contacts only (not Party B) — use can_edit_party_a_contacts
+    caps.can_edit_party_a_contacts = proposal.status !== 'draft';
+    caps.can_edit_party_b_contacts = false;
+    caps.can_edit_party_contacts = false;
     return applyMouFieldCapabilities(req, proposal, caps);
   }
 
@@ -308,6 +316,11 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_send_chat = ready && !locked;
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
+    caps.can_view_companies = true;
+    // Party B may edit own contacts only (not Party A) — mirror of Party A
+    caps.can_edit_party_a_contacts = false;
+    caps.can_edit_party_b_contacts = proposal.status !== 'draft';
+    caps.can_edit_party_contacts = false;
     return applyMouFieldCapabilities(req, proposal, caps);
   }
 
@@ -329,9 +342,13 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_add_activity = approvedAndOpen;
     caps.can_upload_mou = approvedAndOpen && permissionMatchesGrant('proposals.mou.upload', perms);
     caps.can_view_mou = mouVisible;
+    caps.can_view_companies = true;
     caps.can_close_deal =
       canCloseProposalDeal(req, proposal) && permissionMatchesGrant('proposals.deal_close', perms);
-    caps.can_edit_party_contacts = permissionMatchesGrant('proposals.edit_contacts', perms);
+    const canEditContacts = permissionMatchesGrant('proposals.edit_contacts', perms);
+    caps.can_edit_party_contacts = canEditContacts;
+    caps.can_edit_party_a_contacts = canEditContacts;
+    caps.can_edit_party_b_contacts = canEditContacts;
     return applyMouFieldCapabilities(req, proposal, caps);
   }
 
@@ -341,8 +358,12 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_add_activity = approvedAndOpen;
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
+    caps.can_view_companies = true;
     caps.can_close_deal = canCloseProposalDeal(req, proposal);
-    caps.can_edit_party_contacts = proposal.status !== 'draft';
+    const canEditContacts = proposal.status !== 'draft';
+    caps.can_edit_party_contacts = canEditContacts;
+    caps.can_edit_party_a_contacts = canEditContacts;
+    caps.can_edit_party_b_contacts = canEditContacts;
     if (reviewable) {
       caps.can_approve = permissionMatchesGrant('proposals.approve', perms);
       caps.can_reject = permissionMatchesGrant('proposals.reject', perms);
@@ -356,8 +377,12 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     caps.can_add_activity = approvedAndOpen;
     caps.can_upload_mou = approvedAndOpen;
     caps.can_view_mou = mouVisible;
+    caps.can_view_companies = true;
     caps.can_close_deal = canCloseProposalDeal(req, proposal);
-    caps.can_edit_party_contacts = proposal.status !== 'draft';
+    const canEditContacts = proposal.status !== 'draft';
+    caps.can_edit_party_contacts = canEditContacts;
+    caps.can_edit_party_a_contacts = canEditContacts;
+    caps.can_edit_party_b_contacts = canEditContacts;
     if (reviewable) {
       caps.can_approve = true;
       caps.can_reject = true;

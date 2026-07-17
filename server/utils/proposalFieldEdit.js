@@ -132,12 +132,42 @@ function applyConferenceKeyUpdate(updates, conferenceKey) {
   return { updates };
 }
 
+const PARTY_B_FIELD_KEYS = [
+  'party_b_info',
+  'party_b_email',
+  'party_b_name',
+  'party_b_phone',
+  'party_b_country',
+  'party_b_city',
+  'party_b_organization',
+  'party_b_contact_name',
+  'party_b_designation',
+  'party_b_entity_type',
+];
+
+const PARTY_A_CONTACT_FIELD_KEYS = ['party_a_info', 'company_name'];
+
 function buildProposalFieldUpdates(body, existingRow, user) {
   if (body.sector !== undefined && !canChangeProposalSector(user)) {
     return { error: 'Only admin and super admin can change sector', status: 403 };
   }
 
   const sanitizedBody = { ...body };
+
+  // Each party edits own side on Companies — block cross-side via Edit MOU fields
+  if (user?.role === 'party_a') {
+    const triedPartyB = PARTY_B_FIELD_KEYS.some((key) => sanitizedBody[key] !== undefined);
+    if (triedPartyB) {
+      return { error: 'You cannot edit Party B contacts', status: 403 };
+    }
+  }
+  if (user?.role === 'party_b') {
+    const triedPartyA = PARTY_A_CONTACT_FIELD_KEYS.some((key) => sanitizedBody[key] !== undefined);
+    if (triedPartyA) {
+      return { error: 'You cannot edit Party A contacts', status: 403 };
+    }
+  }
+
   if (sanitizedBody.party_a_info !== undefined) {
     sanitizedBody.party_a_info = stripExcludedPartyAInfo(sanitizedBody.party_a_info);
     if (

@@ -464,15 +464,10 @@ async function syncProgressEntryToProposal(proposalRow, activity, body = {}) {
   };
 }
 
-async function syncManualProgressToProposal(proposalRow, { description, activityDate, createdAt } = {}) {
-  const progressValue = buildManualProgressMouValue(description, {
-    activityDate,
-    createdAt,
-  });
-  if (!progressValue) return null;
-
+async function writeProposalProgressField(proposalRow, progressValue) {
   const before = enrichProposalRow(proposalRow);
-  const execPatch = { ...before.executive_summary, progress: progressValue };
+  const nextProgress = progressValue == null ? '' : String(progressValue);
+  const execPatch = { ...before.executive_summary, progress: nextProgress };
 
   await pool.query('UPDATE proposals SET executive_summary = ? WHERE id = ?', [
     JSON.stringify(execPatch),
@@ -482,7 +477,7 @@ async function syncManualProgressToProposal(proposalRow, { description, activity
   const enriched = enrichProposalRow({ ...proposalRow, executive_summary: execPatch });
   return {
     synced: true,
-    applied_fields: { 'executive_summary.progress': progressValue },
+    applied_fields: { 'executive_summary.progress': nextProgress },
     mou_fields: {
       progress: enriched.executive_summary?.progress || '',
       bottlenecks: enriched.executive_summary?.bottlenecks || '',
@@ -493,7 +488,64 @@ async function syncManualProgressToProposal(proposalRow, { description, activity
       location: enriched.executive_summary?.location || '',
       proposal_description: enriched.proposal_description || '',
     },
+    restored_from_activity_id: null,
   };
+}
+
+function progressValueFromActivity(activity) {
+  if (!activity) return '';
+
+  const source = activity.source || 'manual';
+  if (source === 'manual') {
+    return (
+      buildManualProgressMouValue(activity.description, {
+        activityDate: activity.activity_date,
+        createdAt: activity.created_at,
+      }) || ''
+    );
+  }
+
+  const synced = parseActivitySyncedFields(activity.synced_fields) || [];
+  const progressChange = synced.find((change) => change.field === PROGRESS_TAB_SYNC_FIELD);
+  if (progressChange && progressChange.new_value != null) {
+    return String(progressChange.new_value);
+  }
+
+  return '';
+}
+
+/**
+ * After a Progress-tab row is deleted, set Details/banner Progress to the
+ * latest remaining entry — or clear if none left.
+ */
+async function resyncProposalProgressAfterDelete(proposalRow, deletedActivity) {
+  if (!proposalRow?.id || !isProgressTabEntry(deletedActivity)) {
+    return null;
+  }
+
+  const [rows] = await pool.query(
+    `SELECT *
+     FROM proposal_activities
+     WHERE proposal_id = ?
+     ORDER BY created_at DESC, id DESC`,
+    [proposalRow.id]
+  );
+
+  const latest = filterProgressTabActivities(rows)[0] || null;
+  const progressValue = progressValueFromActivity(latest);
+  const result = await writeProposalProgressField(proposalRow, progressValue);
+  result.restored_from_activity_id = latest ? Number(latest.id) : null;
+  return result;
+}
+
+async function syncManualProgressToProposal(proposalRow, { description, activityDate, createdAt } = {}) {
+  const progressValue = buildManualProgressMouValue(description, {
+    activityDate,
+    createdAt,
+  });
+  if (!progressValue) return null;
+
+  return writeProposalProgressField(proposalRow, progressValue);
 }
 
 async function recordProgressFromFieldUpdates({ proposalId, user, beforeRow, updates }) {
@@ -550,6 +602,7 @@ module.exports = {
   buildProposalSqlUpdatesFromFieldPaths,
   syncProgressEntryToProposal,
   syncManualProgressToProposal,
+  resyncProposalProgressAfterDelete,
   normalizeProgressDescriptionInput,
   normalizeProgressActivityDateInput,
   formatProgressRecordedAt,

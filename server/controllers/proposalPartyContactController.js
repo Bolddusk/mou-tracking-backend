@@ -10,7 +10,7 @@ const { provisionPartyBForProposal } = require('../utils/partyBProvisioner');
 const { provisionPartyAForProposal } = require('../utils/partyAProvisioner');
 const { sectorLeadHasAnySector } = require('../utils/sectorLeadAssignments');
 const { logProposalUpdates } = require('../utils/proposalChangeLog');
-const { normalizeEmail } = require('../utils/emailNormalize');
+const { normalizeEmail, isValidLoginEmail } = require('../utils/emailNormalize');
 const { buildPartyBContactUpdates } = require('../utils/partyBInfo');
 
 const PARTY_A_INFO_FIELDS = [
@@ -35,11 +35,6 @@ function parsePartyAInfo(raw) {
   }
 }
 
-function isValidEmail(value) {
-  if (!value) return true;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
-}
-
 async function verifyPartyContactEditAccess(req, proposal) {
   if (!proposal) {
     return { error: 'Proposal not found', status: 404 };
@@ -49,8 +44,13 @@ async function verifyPartyContactEditAccess(req, proposal) {
     return { error: 'Party contact details cannot be edited on draft proposals', status: 400 };
   }
 
-  if (req.user.role === 'super_admin') {
-    return { ok: true, proposal };
+  if (req.user.role === 'super_admin' || req.user.role === 'admin') {
+    return {
+      ok: true,
+      proposal,
+      canEditPartyA: true,
+      canEditPartyB: true,
+    };
   }
 
   if (req.user.role === 'sector_lead') {
@@ -61,18 +61,65 @@ async function verifyPartyContactEditAccess(req, proposal) {
     if (!slAccess.ok) {
       return { error: 'Access denied — wrong sector', status: 403 };
     }
-    return { ok: true, proposal, viaMatchmaking: slAccess.viaMatchmaking };
+    return {
+      ok: true,
+      proposal,
+      viaMatchmaking: slAccess.viaMatchmaking,
+      canEditPartyA: true,
+      canEditPartyB: true,
+    };
+  }
+
+  if (
+    req.user.role === 'party_a' &&
+    Number(proposal.party_a_id) === Number(req.user.id)
+  ) {
+    return {
+      ok: true,
+      proposal,
+      canEditPartyA: true,
+      canEditPartyB: false,
+    };
+  }
+
+  if (
+    req.user.role === 'party_b' &&
+    Number(proposal.party_b_user_id) === Number(req.user.id)
+  ) {
+    return {
+      ok: true,
+      proposal,
+      canEditPartyA: false,
+      canEditPartyB: true,
+    };
   }
 
   return { error: 'Access denied', status: 403 };
 }
 
-function buildPartyContactUpdates(body, existingProposal) {
+function buildPartyContactUpdates(body, existingProposal, scope = {}) {
+  const canEditPartyA = scope.canEditPartyA !== false;
+  const canEditPartyB = scope.canEditPartyB !== false;
   const updates = {};
   const existingPartyAInfo = parsePartyAInfo(existingProposal.party_a_info);
   const nextPartyAInfo = { ...existingPartyAInfo };
 
-  if (body.party_a_info && typeof body.party_a_info === 'object') {
+  const wantsPartyA =
+    body.party_a_info && typeof body.party_a_info === 'object';
+  const wantsPartyB =
+    (body.party_b_info && typeof body.party_b_info === 'object') ||
+    body.party_b_email !== undefined ||
+    body.party_b_name !== undefined ||
+    body.party_b_phone !== undefined;
+
+  if (wantsPartyA && !canEditPartyA) {
+    return { error: 'You cannot edit Party A contacts', status: 403 };
+  }
+  if (wantsPartyB && !canEditPartyB) {
+    return { error: 'You cannot edit Party B contacts', status: 403 };
+  }
+
+  if (wantsPartyA && canEditPartyA) {
     PARTY_A_INFO_FIELDS.forEach((key) => {
       if (body.party_a_info[key] !== undefined) {
         let value =
@@ -90,24 +137,30 @@ function buildPartyContactUpdates(body, existingProposal) {
     }
   }
 
-  const partyBResult = buildPartyBContactUpdates(body, existingProposal);
-  if (partyBResult) {
-    Object.assign(updates, partyBResult.updates);
+  let partyBResult = null;
+  if (canEditPartyB) {
+    partyBResult = buildPartyBContactUpdates(body, existingProposal);
+    if (partyBResult) {
+      Object.assign(updates, partyBResult.updates);
+    }
+  }
+
+  const partyAEmail = nextPartyAInfo.email || '';
+  if (wantsPartyA && partyAEmail && !isValidLoginEmail(partyAEmail)) {
+    return {
+      error: 'Invalid Party A email address — use a real email (e.g. name@domain.com)',
+      status: 400,
+    };
   }
 
   const partyBEmail =
     partyBResult?.nextInfo?.email ||
     (body.party_b_email !== undefined ? normalizeEmail(body.party_b_email) : null);
-  if (partyBEmail && !isValidEmail(partyBEmail)) {
-    return { error: 'Invalid Party B email address', status: 400 };
-  }
-
-  if (
-    body.party_a_info?.email !== undefined &&
-    body.party_a_info.email &&
-    !isValidEmail(body.party_a_info.email)
-  ) {
-    return { error: 'Invalid Party A email address', status: 400 };
+  if (partyBEmail && !isValidLoginEmail(partyBEmail)) {
+    return {
+      error: 'Invalid Party B email address — use a real email (e.g. name@domain.com)',
+      status: 400,
+    };
   }
 
   return { updates, nextPartyAInfo, nextPartyBInfo: partyBResult?.nextInfo || null };
@@ -126,7 +179,10 @@ async function updateProposalPartyContacts(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const built = buildPartyContactUpdates(req.body, proposal);
+    const built = buildPartyContactUpdates(req.body, proposal, {
+      canEditPartyA: access.canEditPartyA,
+      canEditPartyB: access.canEditPartyB,
+    });
     if (built.error) {
       return res.status(built.status).json({ error: built.error });
     }

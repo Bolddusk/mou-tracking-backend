@@ -104,7 +104,14 @@ const conferenceReportRoles = [
   verifyToken,
   requireRole('super_admin', 'admin', 'sector_lead'),
 ];
-const editContactsRoles = [verifyToken, requireAnyPermission('proposals.edit_contacts')];
+const editContactsRoles = [
+  verifyToken,
+  async (req, res, next) => {
+    // Linked Party A / Party B may edit own side; staff use proposals.edit_contacts
+    if (req.user?.role === 'party_a' || req.user?.role === 'party_b') return next();
+    return requireAnyPermission('proposals.edit_contacts')(req, res, next);
+  },
+];
 const proposalViewRoles = [
   verifyToken,
   requireAnyPermission('proposals.view', 'proposals.view_detail', 'proposals.view_own'),

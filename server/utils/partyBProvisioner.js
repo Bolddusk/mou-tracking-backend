@@ -7,6 +7,7 @@ const {
   buildCredentialsPayload,
 } = require('./partyBCredentials');
 const { buildPartyBInfoFromRow } = require('./partyBInfo');
+const { isValidLoginEmail } = require('./emailNormalize');
 
 async function findUserByEmail(email) {
   const [rows] = await pool.query('SELECT id, email, role FROM users WHERE email = ?', [
@@ -32,6 +33,12 @@ async function provisionPartyBForProposal(proposal) {
   if (!email) {
     result.skipped = true;
     result.reason = 'missing_party_b_email';
+    return result;
+  }
+
+  if (!isValidLoginEmail(email)) {
+    result.skipped = true;
+    result.reason = 'invalid_party_b_email';
     return result;
   }
 

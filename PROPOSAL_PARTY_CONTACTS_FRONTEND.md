@@ -2,20 +2,22 @@
 
 **Backend:** your API host (e.g. `http://localhost:5000`)  
 **Auth:** `Authorization: Bearer <token>`  
-**Roles:** `sector_lead`, `super_admin`
+**Roles:** `sector_lead`, `super_admin`, `admin`, linked `party_a` / `party_b` (own side only)
 
-Allows Sector Lead and Super Admin to edit **Party A** and **Party B** contact information on a proposal detail page (email, phone, organization, etc.) and save.
+Staff edit both sides; each linked party edits **only their own** side.
+
+**Companies tab (parties):** see `COMPANIES_TAB_PARTY_A_FRONTEND.md`.
 
 ---
 
 ## 1. Who can edit
 
-| Role | Can edit? | Rule |
-|------|-----------|------|
-| `super_admin` | ✅ Yes | Any proposal except `draft` |
-| `sector_lead` | ✅ Yes | Own sector only (same rule as proposal detail access) |
-| `party_a` | ❌ No | Use normal draft flow |
-| `party_b` | ❌ No | — |
+| Role | Party A card | Party B card | Rule |
+|------|--------------|--------------|------|
+| `super_admin` / `admin` | ✅ | ✅ | Any proposal except `draft` |
+| `sector_lead` | ✅ | ✅ | Own sector only |
+| `party_a` (linked) | ✅ | ❌ | Own MOU, non-draft |
+| `party_b` (linked) | ❌ | ✅ | Own MOU, non-draft |
 
 Check capability from proposal detail:
 
@@ -28,12 +30,19 @@ Response includes:
 ```json
 {
   "capabilities": {
+    "can_view_companies": true,
+    "can_edit_party_a_contacts": true,
+    "can_edit_party_b_contacts": true,
     "can_edit_party_contacts": true
   }
 }
 ```
 
-Show **Edit** button on Party A / Party B cards only when `can_edit_party_contacts === true`.
+| Flag | UI |
+|------|-----|
+| `can_edit_party_a_contacts` | Edit on Pakistani card |
+| `can_edit_party_b_contacts` | Edit on Chinese card |
+| `can_edit_party_contacts` | Legacy (staff both); Party A is `false` — use split flags |
 
 ---
 

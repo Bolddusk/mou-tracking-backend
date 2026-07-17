@@ -6,6 +6,7 @@ const {
   shouldReturnCredentialsInResponse,
   buildCredentialsPayload,
 } = require('./partyBCredentials');
+const { isValidLoginEmail } = require('./emailNormalize');
 
 function parsePartyAInfo(raw) {
   if (!raw) return {};
@@ -43,6 +44,12 @@ async function provisionPartyAForProposal(proposal) {
   if (!email) {
     result.skipped = true;
     result.reason = 'missing_party_a_email';
+    return result;
+  }
+
+  if (!isValidLoginEmail(email)) {
+    result.skipped = true;
+    result.reason = 'invalid_party_a_email';
     return result;
   }
 

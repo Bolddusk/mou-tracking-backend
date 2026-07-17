@@ -12,6 +12,7 @@ const {
   filterProgressTabActivities,
   syncProgressEntryToProposal,
   syncManualProgressToProposal,
+  resyncProposalProgressAfterDelete,
   normalizeProgressDescriptionInput,
   normalizeProgressActivityDateInput,
 } = require('../utils/progressActivity');
@@ -479,7 +480,14 @@ async function deleteProgressEntry(req, res) {
     await pool.query('DELETE FROM activity_approvals WHERE activity_id = ?', [req.params.activityId]);
     await pool.query('DELETE FROM proposal_activities WHERE id = ?', [req.params.activityId]);
 
-    return res.json({ message: 'Progress entry deleted successfully', id: Number(req.params.activityId) });
+    // Details / banner Progress must match latest remaining Progress entry (or clear)
+    const mouSync = await resyncProposalProgressAfterDelete(proposal, activity);
+
+    return res.json({
+      message: 'Progress entry deleted successfully',
+      id: Number(req.params.activityId),
+      mou_sync: mouSync,
+    });
   } catch (err) {
     console.error('Delete progress entry error:', err.message);
     return res.status(500).json({ error: 'Failed to delete progress entry' });
