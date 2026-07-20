@@ -1,6 +1,11 @@
 const pool = require('../config/db');
 const { enrichProposalRow } = require('./proposalTemplate');
 const { resolveMouLifecycle } = require('./mouLifecycle');
+const {
+  buildProposalListWhere,
+  validateProposalListQuery,
+  buildListFiltersEcho,
+} = require('./proposalListFilters');
 
 const PROPOSAL_SELECT = `
   SELECT
@@ -333,21 +338,101 @@ function buildSections(proposals) {
   return sections;
 }
 
-async function fetchConferenceProposals(conferenceKey, sectorScopes = null) {
-  const params = [conferenceKey];
-  let sql = `${PROPOSAL_SELECT}
-    WHERE p.conference_key = ?
-      AND p.status != 'draft'
-      AND p.deleted_at IS NULL`;
+const REPORT_FILTER_KEYS = [
+  'sector',
+  'cooperation_mode',
+  'sifc_category',
+  'mou_lifecycle',
+  'date_from',
+  'date_to',
+  'q',
+  'status',
+  'archive_filter',
+  'archive',
+  'archived_only',
+  'include_deleted',
+];
 
-  if (sectorScopes?.length) {
-    sql += ` AND p.sector IN (${sectorScopes.map(() => '?').join(', ')})`;
-    params.push(...sectorScopes);
+function pickReportFilters(query = {}) {
+  const filters = {};
+  for (const key of REPORT_FILTER_KEYS) {
+    if (query[key] !== undefined && query[key] !== null && String(query[key]).trim() !== '') {
+      filters[key] = query[key];
+    }
+  }
+  return filters;
+}
+
+function hasActiveReportFilters(filters = {}) {
+  return REPORT_FILTER_KEYS.some((key) => {
+    if (filters[key] === undefined || filters[key] === null) return false;
+    const value = String(filters[key]).trim().toLowerCase();
+    if (!value) return false;
+    // Default archive "active only" is normal list behaviour — still a filter for report scope
+    return true;
+  });
+}
+
+/**
+ * Conference SIFC report rows.
+ * - Always scoped to conference_key
+ * - Optional dashboard filters (sector, mode, SIFC, lifecycle, dates, search, archive)
+ * - sectorScopes: Sector Lead assigned sectors
+ * - partyUserId / partyRole: Party A/B only see linked MOUs
+ */
+async function fetchConferenceProposals(conferenceKey, options = {}) {
+  let sectorScopes = null;
+  let filters = {};
+  let partyUserId = null;
+  let partyRole = null;
+
+  // Backward compat: fetchConferenceProposals(key, sectorScopesArray)
+  if (Array.isArray(options)) {
+    sectorScopes = options;
+  } else if (options && typeof options === 'object') {
+    sectorScopes = options.sectorScopes ?? null;
+    filters = options.filters || {};
+    partyUserId = options.partyUserId ?? null;
+    partyRole = options.partyRole ?? null;
   }
 
-  sql += ' ORDER BY p.id ASC';
+  const listQuery = {
+    ...filters,
+    conference_key: conferenceKey,
+  };
 
-  const [rows] = await pool.query(sql, params);
+  const { sql, params } = buildProposalListWhere(listQuery, {
+    sectorScopes,
+    allowIncludeDeleted: true,
+  });
+
+  const conditions = [];
+  const queryParams = [...params];
+
+  if (sql) {
+    // buildProposalListWhere returns " WHERE ..."
+    conditions.push(sql.replace(/^\s*WHERE\s+/i, ''));
+  } else {
+    conditions.push('p.conference_key = ?');
+    queryParams.push(conferenceKey);
+    conditions.push('p.deleted_at IS NULL');
+  }
+
+  // Reports never include drafts unless an explicit status filter was requested
+  if (!filters.status) {
+    conditions.push("p.status != 'draft'");
+  }
+
+  if (partyRole === 'party_a' && partyUserId) {
+    conditions.push('p.party_a_id = ?');
+    queryParams.push(partyUserId);
+  } else if ((partyRole === 'party_b' || partyRole === 'investor') && partyUserId) {
+    conditions.push('p.party_b_user_id = ?');
+    queryParams.push(partyUserId);
+  }
+
+  const fullSql = `${PROPOSAL_SELECT} WHERE ${conditions.join(' AND ')} ORDER BY p.id ASC`;
+  const [rows] = await pool.query(fullSql, queryParams);
   return rows.map((row) => enrichProposalRow(row));
 }
 
@@ -399,18 +484,41 @@ async function buildProposalSifcReport(proposal, conference = null) {
   return buildSingleMouSifcReport(proposal, conference);
 }
 
-async function buildConferenceReport(conference, { sectorScopes = null, scope = {} } = {}) {
-  const proposals = await fetchConferenceProposals(conference.key, sectorScopes);
+async function buildConferenceReport(
+  conference,
+  {
+    sectorScopes = null,
+    scope = {},
+    filters = {},
+    partyUserId = null,
+    partyRole = null,
+  } = {}
+) {
+  const proposals = await fetchConferenceProposals(conference.key, {
+    sectorScopes,
+    filters,
+    partyUserId,
+    partyRole,
+  });
 
-  return buildReportFromProposals(
+  const report = buildReportFromProposals(
     proposals,
     {
       key: conference.key,
       name: conference.name,
       report_title: conference.report_title || conference.name,
     },
-    scope
+    {
+      ...scope,
+      filters: buildListFiltersEcho(
+        { ...filters, conference_key: conference.key },
+        { sectorScopes }
+      ),
+      filters_applied: hasActiveReportFilters(filters),
+    }
   );
+
+  return report;
 }
 
 module.exports = {
@@ -419,6 +527,9 @@ module.exports = {
   buildReportFromProposals,
   fetchConferenceProposals,
   fetchProposalForSifcReport,
+  pickReportFilters,
+  hasActiveReportFilters,
+  validateProposalListQuery,
   parseSifcCategory,
   getOperationalBucket,
   parseUsdM,

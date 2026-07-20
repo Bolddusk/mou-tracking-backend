@@ -102,7 +102,7 @@ const archiveProposalRoles = [verifyToken, requireRole('super_admin', 'admin')];
 const exportReportRoles = [verifyToken, requireAnyPermission('proposals.export')];
 const conferenceReportRoles = [
   verifyToken,
-  requireRole('super_admin', 'admin', 'sector_lead'),
+  requireRole('super_admin', 'admin', 'sector_lead', 'party_a', 'party_b', 'investor'),
 ];
 const editContactsRoles = [
   verifyToken,

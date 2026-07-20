@@ -1,13 +1,25 @@
 const { getConferenceByKey, getReportableConference } = require('../constants/conferences');
-const { buildConferenceReport } = require('../utils/conferenceReport');
+const {
+  buildConferenceReport,
+  pickReportFilters,
+  validateProposalListQuery,
+} = require('../utils/conferenceReport');
 const {
   conferenceReportToPdf,
   conferenceReportToXlsx,
   reportDownloadBasename,
 } = require('../utils/conferenceReportFormats');
 const { getSectorLeadScopedSectors } = require('../utils/sectorLeadAssignments');
+const { getActiveSectorNames } = require('../utils/sectorRegistry');
 
-const REPORT_ROLES = new Set(['super_admin', 'admin', 'sector_lead']);
+const REPORT_ROLES = new Set([
+  'super_admin',
+  'admin',
+  'sector_lead',
+  'party_a',
+  'party_b',
+  'investor',
+]);
 
 async function getConferenceReport(req, res) {
   try {
@@ -33,7 +45,17 @@ async function getConferenceReport(req, res) {
       });
     }
 
+    const filters = pickReportFilters(req.query);
+    const validationErrors = validateProposalListQuery(filters, getActiveSectorNames(), {
+      ignoreSectorFilter: req.user.role === 'sector_lead',
+    });
+    if (validationErrors.length) {
+      return res.status(400).json({ error: validationErrors[0], errors: validationErrors });
+    }
+
     let sectorScopes = null;
+    let partyUserId = null;
+    let partyRole = null;
     let scope = { list_scope: 'all', sector: null, sectors: null };
 
     if (req.user.role === 'sector_lead') {
@@ -41,14 +63,32 @@ async function getConferenceReport(req, res) {
       if (!sectorScopes.length) {
         return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
       }
+      // If SL picks a sector filter, it must be within their scopes
+      if (filters.sector && !sectorScopes.includes(String(filters.sector).trim())) {
+        return res.status(403).json({ error: 'Sector filter is outside your assigned sectors' });
+      }
       scope = {
         list_scope: 'sector',
         sector: sectorScopes.length === 1 ? sectorScopes[0] : null,
         sectors: sectorScopes,
       };
+    } else if (req.user.role === 'party_a') {
+      partyUserId = req.user.id;
+      partyRole = 'party_a';
+      scope = { list_scope: 'own_party_a', sector: null, sectors: null };
+    } else if (req.user.role === 'party_b' || req.user.role === 'investor') {
+      partyUserId = req.user.id;
+      partyRole = req.user.role;
+      scope = { list_scope: 'own_party_b', sector: null, sectors: null };
     }
 
-    const report = await buildConferenceReport(conference, { sectorScopes, scope });
+    const report = await buildConferenceReport(conference, {
+      sectorScopes,
+      scope,
+      filters,
+      partyUserId,
+      partyRole,
+    });
     const format = String(req.query.format || 'json').toLowerCase();
     const basename = reportDownloadBasename(conferenceKey);
 
