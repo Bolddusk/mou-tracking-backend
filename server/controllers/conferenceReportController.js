@@ -27,25 +27,31 @@ async function getConferenceReport(req, res) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const conferenceKey = String(req.query.conference_key || '').trim();
-    if (!conferenceKey) {
-      return res.status(400).json({ error: 'conference_key is required' });
-    }
+    // Optional: omit / empty / "all" → All conferences report
+    const rawKey = String(req.query.conference_key || '').trim();
+    const allConferences =
+      !rawKey || rawKey.toLowerCase() === 'all' || rawKey.toLowerCase() === 'all_conferences';
 
-    const known = getConferenceByKey(conferenceKey);
-    if (!known) {
-      return res.status(404).json({ error: 'Conference not found', conference_key: conferenceKey });
-    }
+    let conference = null;
+    if (!allConferences) {
+      const known = getConferenceByKey(rawKey);
+      if (!known) {
+        return res.status(404).json({ error: 'Conference not found', conference_key: rawKey });
+      }
 
-    const conference = getReportableConference(conferenceKey);
-    if (!conference) {
-      return res.status(403).json({
-        error: 'Conference does not support reports',
-        conference_key: conferenceKey,
-      });
+      conference = getReportableConference(rawKey);
+      if (!conference) {
+        return res.status(403).json({
+          error: 'Conference does not support reports',
+          conference_key: rawKey,
+        });
+      }
     }
 
     const filters = pickReportFilters(req.query);
+    // conference_key in query must not double-filter when building all-conference report
+    delete filters.conference_key;
+
     const validationErrors = validateProposalListQuery(filters, getActiveSectorNames(), {
       ignoreSectorFilter: req.user.role === 'sector_lead',
     });
@@ -63,7 +69,6 @@ async function getConferenceReport(req, res) {
       if (!sectorScopes.length) {
         return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
       }
-      // If SL picks a sector filter, it must be within their scopes
       if (filters.sector && !sectorScopes.includes(String(filters.sector).trim())) {
         return res.status(403).json({ error: 'Sector filter is outside your assigned sectors' });
       }
@@ -90,7 +95,7 @@ async function getConferenceReport(req, res) {
       partyRole,
     });
     const format = String(req.query.format || 'json').toLowerCase();
-    const basename = reportDownloadBasename(conferenceKey);
+    const basename = reportDownloadBasename(allConferences ? 'all-conferences' : rawKey);
 
     if (format === 'json') {
       return res.json(report);

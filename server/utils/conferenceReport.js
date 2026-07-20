@@ -375,7 +375,8 @@ function hasActiveReportFilters(filters = {}) {
 
 /**
  * Conference SIFC report rows.
- * - Always scoped to conference_key
+ * - If conferenceKey set → scoped to that conference
+ * - If conferenceKey empty/null → all conferences (dashboard "All conferences")
  * - Optional dashboard filters (sector, mode, SIFC, lifecycle, dates, search, archive)
  * - sectorScopes: Sector Lead assigned sectors
  * - partyUserId / partyRole: Party A/B only see linked MOUs
@@ -396,10 +397,13 @@ async function fetchConferenceProposals(conferenceKey, options = {}) {
     partyRole = options.partyRole ?? null;
   }
 
+  const key = conferenceKey ? String(conferenceKey).trim() : '';
   const listQuery = {
     ...filters,
-    conference_key: conferenceKey,
   };
+  if (key) {
+    listQuery.conference_key = key;
+  }
 
   const { sql, params } = buildProposalListWhere(listQuery, {
     sectorScopes,
@@ -410,11 +414,8 @@ async function fetchConferenceProposals(conferenceKey, options = {}) {
   const queryParams = [...params];
 
   if (sql) {
-    // buildProposalListWhere returns " WHERE ..."
     conditions.push(sql.replace(/^\s*WHERE\s+/i, ''));
   } else {
-    conditions.push('p.conference_key = ?');
-    queryParams.push(conferenceKey);
     conditions.push('p.deleted_at IS NULL');
   }
 
@@ -494,29 +495,39 @@ async function buildConferenceReport(
     partyRole = null,
   } = {}
 ) {
-  const proposals = await fetchConferenceProposals(conference.key, {
+  const allConferences = !conference || !conference.key;
+  const conferenceKey = allConferences ? null : conference.key;
+
+  const proposals = await fetchConferenceProposals(conferenceKey, {
     sectorScopes,
     filters,
     partyUserId,
     partyRole,
   });
 
-  const report = buildReportFromProposals(
-    proposals,
-    {
-      key: conference.key,
-      name: conference.name,
-      report_title: conference.report_title || conference.name,
-    },
-    {
-      ...scope,
-      filters: buildListFiltersEcho(
-        { ...filters, conference_key: conference.key },
-        { sectorScopes }
-      ),
-      filters_applied: hasActiveReportFilters(filters),
-    }
-  );
+  const conferenceMeta = allConferences
+    ? {
+        key: null,
+        name: 'All conferences',
+        report_title: 'SIFC Report — All Conferences',
+        all_conferences: true,
+      }
+    : {
+        key: conference.key,
+        name: conference.name,
+        report_title: conference.report_title || conference.name,
+        all_conferences: false,
+      };
+
+  const report = buildReportFromProposals(proposals, conferenceMeta, {
+    ...scope,
+    filters: buildListFiltersEcho(
+      allConferences ? { ...filters } : { ...filters, conference_key: conference.key },
+      { sectorScopes }
+    ),
+    filters_applied: hasActiveReportFilters(filters),
+    all_conferences: allConferences,
+  });
 
   return report;
 }

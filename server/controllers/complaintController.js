@@ -4,8 +4,11 @@ const {
   checkComplaintAccess,
   checkComplaintReviewAccess,
   checkRfpReviewAccess,
+  checkEscalateAccess,
+  checkReopenAccess,
   canViewInternalTimeline,
   resolveCommentVisibility,
+  isComplaintOverdue,
 } = require('../utils/complaintAccess');
 const {
   getProposalPartyB,
@@ -17,14 +20,32 @@ const {
   canPartyBEngage,
   canViewPartyBEngagement,
 } = require('../utils/complaintPartyBEngagement');
+const {
+  notifyComplaintFiled,
+  notifyComplaintStatusChange,
+  notifyComplaintComment,
+  notifyComplaintEscalated,
+} = require('../utils/complaintNotify');
+
+const SLA_DAYS = Math.max(1, Number(process.env.COMPLAINT_SLA_DAYS) || 7);
+const COMPLAINT_PRIORITIES = ['low', 'normal', 'high'];
+const COMPLAINT_CATEGORIES = [
+  'delay',
+  'documentation',
+  'communication',
+  'misconduct',
+  'other',
+];
 
 const COMPLAINT_SELECT = `
   SELECT c.*,
     p.proposal_title,
     p.sector AS proposal_sector,
+    p.company_name AS proposal_company_name,
     p.party_b_name AS proposal_party_b_name,
     pa.full_name AS filed_by_name,
     pa.email AS filed_by_email,
+    pa.role AS filed_by_role,
     sl.full_name AS tagged_sector_lead_name,
     sl.email AS tagged_sector_lead_email,
     rfp.full_name AS forwarded_to_name,
@@ -55,7 +76,8 @@ async function getUserById(userId) {
 
 async function getProposalForComplaintFiler(proposalId, user) {
   const [rows] = await pool.query(
-    'SELECT id, party_a_id, party_b_user_id, proposal_title, sector FROM proposals WHERE id = ?',
+    `SELECT id, party_a_id, party_b_user_id, proposal_title, sector, company_name, party_b_name
+     FROM proposals WHERE id = ?`,
     [proposalId]
   );
   const proposal = rows[0] || null;
@@ -70,6 +92,73 @@ async function getProposalForComplaintFiler(proposalId, user) {
   }
 
   return null;
+}
+
+/** Resolve Sector Lead for a proposal sector (primary assignment first). */
+async function findSectorLeadIdForSector(sector) {
+  const name = String(sector || '').trim();
+  if (!name) return null;
+
+  const [assigned] = await pool.query(
+    `SELECT sla.user_id
+     FROM sector_lead_assignments sla
+     JOIN users u ON u.id = sla.user_id
+     WHERE u.role = 'sector_lead' AND sla.sector = ?
+     ORDER BY sla.is_primary DESC, sla.id ASC
+     LIMIT 1`,
+    [name]
+  );
+  if (assigned[0]?.user_id) return assigned[0].user_id;
+
+  const [legacy] = await pool.query(
+    `SELECT id FROM users WHERE role = 'sector_lead' AND sector = ? ORDER BY id ASC LIMIT 1`,
+    [name]
+  );
+  return legacy[0]?.id || null;
+}
+
+function buildComplaintCapabilities(req, complaint) {
+  const review = checkComplaintReviewAccess(req, complaint);
+  const closed = ['resolved', 'rejected'].includes(complaint.status);
+  const escalate = checkEscalateAccess(req, complaint);
+  const reopen = checkReopenAccess(req, complaint);
+  return {
+    can_approve: review.ok && !closed,
+    can_reject: review.ok && !closed,
+    can_comment: checkComplaintAccess(req, complaint).ok && !closed,
+    can_escalate: escalate.ok,
+    can_reopen: reopen.ok,
+    can_forward: false,
+  };
+}
+
+function decorateComplaintRow(req, complaint) {
+  const overdue = isComplaintOverdue(complaint);
+  return {
+    ...complaint,
+    is_overdue: overdue,
+    sla_days: SLA_DAYS,
+    outcome:
+      complaint.status === 'resolved' || complaint.status === 'rejected'
+        ? {
+            status: complaint.status,
+            comment: complaint.resolution_comment || null,
+          }
+        : null,
+    capabilities: req ? buildComplaintCapabilities(req, complaint) : null,
+  };
+}
+
+async function findSuperAdminUserIds() {
+  const [rows] = await pool.query(
+    `SELECT id, email FROM users WHERE role = 'super_admin' ORDER BY id ASC`
+  );
+  return rows;
+}
+
+async function findSuperAdminFallbackId() {
+  const rows = await findSuperAdminUserIds();
+  return rows[0]?.id || null;
 }
 
 async function enrichComplaint(complaint, req) {
@@ -138,7 +227,7 @@ async function enrichComplaint(complaint, req) {
   }
 
   return {
-    ...complaint,
+    ...decorateComplaintRow(req, complaint),
     comments: isTaggedPartyB ? [] : publicComments,
     internal_timeline: internalTimeline,
     actions: isTaggedPartyB ? [] : actions,
@@ -150,12 +239,23 @@ async function enrichComplaint(complaint, req) {
 async function createComplaint(req, res) {
   try {
     const proposalId = Number(req.body.proposal_id);
-    const taggedSectorLead = Number(req.body.tagged_sector_lead);
-    const { title, description, document_url } = req.body;
+    const { title, description, document_url, category } = req.body;
+    let taggedSectorLead = req.body.tagged_sector_lead
+      ? Number(req.body.tagged_sector_lead)
+      : null;
+    let priority = String(req.body.priority || 'normal').trim().toLowerCase();
+    if (!COMPLAINT_PRIORITIES.includes(priority)) priority = 'normal';
 
-    if (!proposalId || !taggedSectorLead || !title?.trim() || !description?.trim()) {
+    const categoryValue = category ? String(category).trim().toLowerCase() : null;
+    if (categoryValue && !COMPLAINT_CATEGORIES.includes(categoryValue)) {
       return res.status(400).json({
-        error: 'proposal_id, tagged_sector_lead, title, and description are required',
+        error: `Invalid category. Use: ${COMPLAINT_CATEGORIES.join(', ')}`,
+      });
+    }
+
+    if (!proposalId || !title?.trim() || !description?.trim()) {
+      return res.status(400).json({
+        error: 'proposal_id, title, and description are required',
       });
     }
 
@@ -164,20 +264,56 @@ async function createComplaint(req, res) {
       return res.status(403).json({ error: 'Proposal not found or access denied' });
     }
 
-    const sectorLead = await getUserById(taggedSectorLead);
-    if (!sectorLead || sectorLead.role !== 'sector_lead') {
-      return res.status(400).json({ error: 'tagged_sector_lead must be a valid sector lead' });
+    const [dupes] = await pool.query(
+      `SELECT id FROM complaints
+       WHERE proposal_id = ? AND filed_by = ?
+         AND status IN ('open','under_review','escalated')
+         AND LOWER(TRIM(title)) = LOWER(?)
+       LIMIT 1`,
+      [proposalId, req.user.id, title.trim()]
+    );
+    if (dupes.length) {
+      return res.status(409).json({
+        error: 'An open complaint with the same title already exists for this MOU',
+        existing_complaint_id: dupes[0].id,
+      });
     }
+
+    let awaitingSectorLead = 0;
+    if (!taggedSectorLead) {
+      taggedSectorLead = await findSectorLeadIdForSector(proposal.sector);
+    }
+
+    if (!taggedSectorLead) {
+      taggedSectorLead = await findSuperAdminFallbackId();
+      awaitingSectorLead = 1;
+    }
+
+    if (!taggedSectorLead) {
+      return res.status(400).json({
+        error: 'No sector lead or super admin available to receive this complaint',
+        sector: proposal.sector || null,
+      });
+    }
+
+    const assignee = await getUserById(taggedSectorLead);
+    if (!assignee || !['sector_lead', 'super_admin'].includes(assignee.role)) {
+      return res.status(400).json({ error: 'Invalid complaint assignee' });
+    }
+    if (assignee.role === 'super_admin') awaitingSectorLead = 1;
 
     let docUrl = document_url || null;
     if (req.file) {
       docUrl = getPublicFileUrl(req, req.file.filename, 'complaints');
     }
 
+    const dueAt = new Date(Date.now() + SLA_DAYS * 24 * 60 * 60 * 1000);
+
     const [result] = await pool.query(
       `INSERT INTO complaints
-        (proposal_id, filed_by, tagged_sector_lead, title, description, document_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+        (proposal_id, filed_by, tagged_sector_lead, title, description, document_url, status,
+         priority, category, due_at, awaiting_sector_lead)
+       VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
       [
         proposalId,
         req.user.id,
@@ -185,10 +321,21 @@ async function createComplaint(req, res) {
         title.trim(),
         description.trim(),
         docUrl,
+        priority,
+        categoryValue,
+        dueAt,
+        awaitingSectorLead,
       ]
     );
 
     const complaint = await getComplaintByIdRaw(result.insertId);
+    const admins = await findSuperAdminUserIds();
+    notifyComplaintFiled({
+      complaint,
+      sectorLeadEmail: assignee.email,
+      superAdminEmails: awaitingSectorLead ? admins.map((a) => a.email) : [],
+    }).catch(() => {});
+
     return res.status(201).json(await enrichComplaint(complaint, req));
   } catch (err) {
     console.error('Create complaint error:', err.message);
@@ -216,7 +363,7 @@ async function getMyComplaints(req, res) {
       `${COMPLAINT_SELECT} WHERE c.filed_by = ? ORDER BY c.created_at DESC`,
       [req.user.id]
     );
-    return res.json(rows);
+    return res.json(rows.map((row) => decorateComplaintRow(req, row)));
   } catch (err) {
     console.error('Get my complaints error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch complaints' });
@@ -229,7 +376,7 @@ async function getSectorComplaints(req, res) {
       `${COMPLAINT_SELECT} WHERE c.tagged_sector_lead = ? ORDER BY c.created_at DESC`,
       [req.user.id]
     );
-    return res.json(rows);
+    return res.json(rows.map((row) => decorateComplaintRow(req, row)));
   } catch (err) {
     console.error('Get sector complaints error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch complaints' });
@@ -253,11 +400,171 @@ async function getForwardedComplaints(req, res) {
 
 async function getAllComplaints(req, res) {
   try {
-    const [rows] = await pool.query(`${COMPLAINT_SELECT} ORDER BY c.created_at DESC`);
-    return res.json(rows);
+    const conditions = [];
+    const params = [];
+
+    if (req.query.status) {
+      conditions.push('c.status = ?');
+      params.push(String(req.query.status).trim());
+    }
+
+    const sectorLeadId = Number(req.query.sector_lead_id || req.query.tagged_sector_lead);
+    if (sectorLeadId) {
+      conditions.push('c.tagged_sector_lead = ?');
+      params.push(sectorLeadId);
+    }
+
+    const filedBy = Number(req.query.filed_by || req.query.party_user_id);
+    if (filedBy) {
+      conditions.push('c.filed_by = ?');
+      params.push(filedBy);
+    }
+
+    const proposalId = Number(req.query.proposal_id);
+    if (proposalId) {
+      conditions.push('c.proposal_id = ?');
+      params.push(proposalId);
+    }
+
+    if (req.query.sector) {
+      conditions.push('p.sector = ?');
+      params.push(String(req.query.sector).trim());
+    }
+
+    if (req.query.company || req.query.q) {
+      const term = `%${String(req.query.company || req.query.q).trim()}%`;
+      conditions.push(`(
+        c.title LIKE ?
+        OR p.company_name LIKE ?
+        OR p.proposal_title LIKE ?
+        OR p.party_b_name LIKE ?
+        OR pa.full_name LIKE ?
+        OR pa.organization LIKE ?
+        OR sl.full_name LIKE ?
+      )`);
+      params.push(term, term, term, term, term, term, term);
+    }
+
+    if (req.query.priority) {
+      conditions.push('c.priority = ?');
+      params.push(String(req.query.priority).trim().toLowerCase());
+    }
+
+    if (req.query.category) {
+      conditions.push('c.category = ?');
+      params.push(String(req.query.category).trim().toLowerCase());
+    }
+
+    if (String(req.query.awaiting_sector_lead || '') === '1' || req.query.awaiting_sector_lead === 'true') {
+      conditions.push('c.awaiting_sector_lead = 1');
+    }
+
+    if (String(req.query.escalated || '') === '1' || req.query.escalated === 'true') {
+      conditions.push(`(c.status = 'escalated' OR c.escalated_at IS NOT NULL)`);
+    }
+
+    if (String(req.query.overdue || '') === '1' || req.query.overdue === 'true') {
+      conditions.push(
+        `c.due_at IS NOT NULL AND c.due_at < NOW() AND c.status IN ('open','under_review','escalated')`
+      );
+    }
+
+    const whereSql = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const [rows] = await pool.query(
+      `${COMPLAINT_SELECT}${whereSql} ORDER BY c.created_at DESC`,
+      params
+    );
+
+    const data = rows.map((row) => decorateComplaintRow(req, row));
+
+    return res.json({
+      data,
+      filters: {
+        status: req.query.status || null,
+        sector_lead_id: sectorLeadId || null,
+        filed_by: filedBy || null,
+        proposal_id: proposalId || null,
+        sector: req.query.sector || null,
+        priority: req.query.priority || null,
+        category: req.query.category || null,
+        awaiting_sector_lead: req.query.awaiting_sector_lead || null,
+        escalated: req.query.escalated || null,
+        overdue: req.query.overdue || null,
+        q: req.query.company || req.query.q || null,
+      },
+      total: data.length,
+    });
   } catch (err) {
     console.error('Get all complaints error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch complaints' });
+  }
+}
+
+async function getComplaintFilterOptions(req, res) {
+  try {
+    const [sectorLeads] = await pool.query(
+      `SELECT u.id, u.full_name, u.email, u.sector,
+         (SELECT GROUP_CONCAT(sla.sector ORDER BY sla.is_primary DESC, sla.sector SEPARATOR ', ')
+          FROM sector_lead_assignments sla WHERE sla.user_id = u.id) AS assigned_sectors
+       FROM users u
+       WHERE u.role = 'sector_lead'
+       ORDER BY u.full_name ASC`
+    );
+
+    const [filers] = await pool.query(
+      `SELECT DISTINCT u.id, u.full_name, u.email, u.role, u.organization
+       FROM complaints c
+       JOIN users u ON u.id = c.filed_by
+       ORDER BY u.full_name ASC`
+    );
+
+    const [sectors] = await pool.query(
+      `SELECT DISTINCT p.sector AS sector
+       FROM complaints c
+       JOIN proposals p ON p.id = c.proposal_id
+       WHERE p.sector IS NOT NULL AND p.sector != ''
+       ORDER BY p.sector ASC`
+    );
+
+    return res.json({
+      statuses: [
+        { value: 'open', label: 'Open' },
+        { value: 'under_review', label: 'Under review' },
+        { value: 'escalated', label: 'Escalated' },
+        { value: 'resolved', label: 'Resolved' },
+        { value: 'rejected', label: 'Rejected' },
+      ],
+      priorities: COMPLAINT_PRIORITIES.map((value) => ({
+        value,
+        label: value.charAt(0).toUpperCase() + value.slice(1),
+      })),
+      categories: COMPLAINT_CATEGORIES.map((value) => ({
+        value,
+        label: value.charAt(0).toUpperCase() + value.slice(1),
+      })),
+      sector_leads: sectorLeads.map((row) => ({
+        id: row.id,
+        full_name: row.full_name,
+        email: row.email,
+        sector: row.sector,
+        assigned_sectors: row.assigned_sectors
+          ? String(row.assigned_sectors).split(', ').filter(Boolean)
+          : row.sector
+            ? [row.sector]
+            : [],
+      })),
+      parties: filers.map((row) => ({
+        id: row.id,
+        full_name: row.full_name,
+        email: row.email,
+        role: row.role,
+        organization: row.organization,
+      })),
+      sectors: sectors.map((row) => row.sector),
+    });
+  } catch (err) {
+    console.error('Get complaint filter options error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch complaint filter options' });
   }
 }
 
@@ -289,26 +596,40 @@ async function approveComplaint(req, res) {
     }
 
     const { comment } = req.body;
+    if (!comment || !String(comment).trim()) {
+      return res.status(400).json({ error: 'Comment is required when resolving a complaint' });
+    }
+    const resolutionComment = String(comment).trim();
 
-    await pool.query(`UPDATE complaints SET status = 'resolved' WHERE id = ?`, [req.params.id]);
+    await pool.query(
+      `UPDATE complaints
+       SET status = 'resolved', resolution_comment = ?, awaiting_sector_lead = 0
+       WHERE id = ?`,
+      [resolutionComment, req.params.id]
+    );
 
     await pool.query(
       `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
        VALUES (?, ?, ?, 'approved', ?)`,
-      [req.params.id, req.user.id, req.user.role, comment?.trim() || null]
+      [req.params.id, req.user.id, req.user.role, resolutionComment]
     );
 
-    if (comment?.trim()) {
-      const visibility = resolveCommentVisibility(req, complaint, 'public');
-      await pool.query(
-        `INSERT INTO complaint_comments
-          (complaint_id, commented_by, commented_by_role, comment, visibility)
-         VALUES (?, ?, ?, ?, ?)`,
-        [req.params.id, req.user.id, req.user.role, comment.trim(), visibility]
-      );
-    }
+    await pool.query(
+      `INSERT INTO complaint_comments
+        (complaint_id, commented_by, commented_by_role, comment, visibility)
+       VALUES (?, ?, ?, ?, 'public')`,
+      [req.params.id, req.user.id, req.user.role, resolutionComment]
+    );
 
     const updated = await getComplaintByIdRaw(req.params.id);
+    notifyComplaintStatusChange({
+      complaint: updated,
+      filerEmail: updated.filed_by_email,
+      sectorLeadEmail: updated.tagged_sector_lead_email,
+      outcomeLabel: 'resolved',
+      comment: resolutionComment,
+    }).catch(() => {});
+
     return res.json(await enrichComplaint(updated, req));
   } catch (err) {
     console.error('Approve complaint error:', err.message);
@@ -332,24 +653,37 @@ async function rejectComplaint(req, res) {
     if (!comment || !String(comment).trim()) {
       return res.status(400).json({ error: 'Comment is required when rejecting' });
     }
+    const resolutionComment = String(comment).trim();
 
-    await pool.query(`UPDATE complaints SET status = 'rejected' WHERE id = ?`, [req.params.id]);
+    await pool.query(
+      `UPDATE complaints
+       SET status = 'rejected', resolution_comment = ?, awaiting_sector_lead = 0
+       WHERE id = ?`,
+      [resolutionComment, req.params.id]
+    );
 
     await pool.query(
       `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
        VALUES (?, ?, ?, 'rejected', ?)`,
-      [req.params.id, req.user.id, req.user.role, comment.trim()]
+      [req.params.id, req.user.id, req.user.role, resolutionComment]
     );
 
-    const visibility = resolveCommentVisibility(req, complaint, 'public');
     await pool.query(
       `INSERT INTO complaint_comments
         (complaint_id, commented_by, commented_by_role, comment, visibility)
-       VALUES (?, ?, ?, ?, ?)`,
-      [req.params.id, req.user.id, req.user.role, comment.trim(), visibility]
+       VALUES (?, ?, ?, ?, 'public')`,
+      [req.params.id, req.user.id, req.user.role, resolutionComment]
     );
 
     const updated = await getComplaintByIdRaw(req.params.id);
+    notifyComplaintStatusChange({
+      complaint: updated,
+      filerEmail: updated.filed_by_email,
+      sectorLeadEmail: updated.tagged_sector_lead_email,
+      outcomeLabel: 'rejected',
+      comment: resolutionComment,
+    }).catch(() => {});
+
     return res.json(await enrichComplaint(updated, req));
   } catch (err) {
     console.error('Reject complaint error:', err.message);
@@ -358,150 +692,15 @@ async function rejectComplaint(req, res) {
 }
 
 async function forwardComplaint(req, res) {
-  try {
-    if (req.user.role !== 'sector_lead') {
-      return res.status(403).json({ error: 'Only sector leads can forward complaints' });
-    }
-
-    const complaint = await getComplaintByIdRaw(req.params.id);
-    if (!complaint) {
-      return res.status(404).json({ error: 'Complaint not found' });
-    }
-
-    if (complaint.tagged_sector_lead !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    const allowedForward = ['open', 'under_review', 'returned_to_sector_lead'];
-    if (!allowedForward.includes(complaint.status)) {
-      return res.status(400).json({ error: 'Complaint cannot be forwarded in its current status' });
-    }
-
-    const regionalFocalPointId = Number(req.body.regional_focal_point_id);
-    const { comment } = req.body;
-
-    if (!regionalFocalPointId) {
-      return res.status(400).json({ error: 'regional_focal_point_id is required' });
-    }
-
-    const rfp = await getUserById(regionalFocalPointId);
-    if (!rfp || rfp.role !== 'regional_focal_point') {
-      return res.status(400).json({
-        error: 'regional_focal_point_id must be a valid regional focal point',
-      });
-    }
-
-    await pool.query(
-      `UPDATE complaints
-       SET status = 'forwarded',
-           forwarded_to = ?,
-           forwarded_at = NOW(),
-           returned_at = NULL,
-           returned_by = NULL
-       WHERE id = ?`,
-      [regionalFocalPointId, req.params.id]
-    );
-
-    await pool.query(
-      `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
-       VALUES (?, ?, ?, 'forwarded', ?)`,
-      [req.params.id, req.user.id, req.user.role, comment?.trim() || null]
-    );
-
-    if (comment?.trim()) {
-      await pool.query(
-        `INSERT INTO complaint_comments
-          (complaint_id, commented_by, commented_by_role, comment, visibility)
-         VALUES (?, ?, ?, ?, 'internal')`,
-        [req.params.id, req.user.id, req.user.role, comment.trim()]
-      );
-    }
-
-    const updated = await getComplaintByIdRaw(req.params.id);
-    return res.json(await enrichComplaint(updated, req));
-  } catch (err) {
-    console.error('Forward complaint error:', err.message);
-    return res.status(500).json({ error: 'Failed to forward complaint' });
-  }
+  return res.status(403).json({
+    error: 'Forward to Regional FP is disabled — use Resolve, Reject, or Comment only',
+  });
 }
 
 async function returnToSectorLead(req, res) {
-  try {
-    const complaint = await getComplaintByIdRaw(req.params.id);
-    const access = checkRfpReviewAccess(req, complaint);
-    if (!access.ok) {
-      return res.status(access.status).json({ error: access.error });
-    }
-
-    if (!complaint.party_b_tagged_at) {
-      return res.status(400).json({
-        error: 'Tag Party B and complete engagement before returning to sector lead',
-      });
-    }
-
-    const { comment } = req.body;
-    const partyBDocs = await getPartyBDocumentsFromEngagement(req.params.id);
-
-    await pool.query(
-      `UPDATE complaints
-       SET status = 'returned_to_sector_lead',
-           returned_at = NOW(),
-           returned_by = ?
-       WHERE id = ?`,
-      [req.user.id, req.params.id]
-    );
-
-    await pool.query(
-      `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
-       VALUES (?, ?, ?, 'returned', ?)`,
-      [req.params.id, req.user.id, req.user.role, comment?.trim() || null]
-    );
-
-    const returnNote =
-      comment?.trim() ||
-      'Returned to sector lead with Party B documents from regional engagement.';
-
-    await pool.query(
-      `INSERT INTO complaint_comments
-        (complaint_id, commented_by, commented_by_role, comment, visibility)
-       VALUES (?, ?, ?, ?, 'internal')`,
-      [req.params.id, req.user.id, req.user.role, returnNote]
-    );
-
-    for (const doc of partyBDocs) {
-      const docComment = [
-        `[Party B document — ${doc.author_name}]`,
-        doc.title ? `Title: ${doc.title}` : null,
-        doc.comment || doc.description || null,
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      await pool.query(
-        `INSERT INTO complaint_comments
-          (complaint_id, commented_by, commented_by_role, comment, visibility, document_url)
-         VALUES (?, ?, ?, ?, 'internal', ?)`,
-        [
-          req.params.id,
-          req.user.id,
-          req.user.role,
-          docComment,
-          doc.document_url,
-        ]
-      );
-    }
-
-    const updated = await getComplaintByIdRaw(req.params.id);
-    const enriched = await enrichComplaint(updated, req);
-    return res.json({
-      ...enriched,
-      party_b_documents_forwarded: partyBDocs,
-      message: 'Complaint returned to sector lead with Party B documents',
-    });
-  } catch (err) {
-    console.error('Return complaint error:', err.message);
-    return res.status(500).json({ error: 'Failed to return complaint to sector lead' });
-  }
+  return res.status(403).json({
+    error: 'Regional FP return flow is disabled — use Resolve, Reject, or Comment only',
+  });
 }
 
 async function tagPartyB(req, res) {
@@ -787,6 +986,10 @@ async function addComment(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
+    if (['resolved', 'rejected'].includes(complaint.status)) {
+      return res.status(400).json({ error: 'Cannot comment on a closed complaint' });
+    }
+
     const { comment, visibility: requestedVisibility, document_url } = req.body;
     if (!comment || !String(comment).trim()) {
       return res.status(400).json({ error: 'Comment is required' });
@@ -813,6 +1016,7 @@ async function addComment(req, res) {
       docUrl = getPublicFileUrl(req, req.file.filename, 'complaints');
     }
 
+    const commentText = comment.trim();
     const [result] = await pool.query(
       `INSERT INTO complaint_comments
         (complaint_id, commented_by, commented_by_role, comment, visibility, document_url)
@@ -821,11 +1025,26 @@ async function addComment(req, res) {
         req.params.id,
         req.user.id,
         req.user.role,
-        comment.trim(),
+        commentText,
         visibility,
         docUrl,
       ]
     );
+
+    const reviewerRoles = ['sector_lead', 'super_admin'];
+    if (reviewerRoles.includes(req.user.role) && complaint.status === 'open') {
+      await pool.query(
+        `UPDATE complaints
+         SET status = 'under_review', under_review_at = COALESCE(under_review_at, NOW())
+         WHERE id = ? AND status = 'open'`,
+        [req.params.id]
+      );
+      await pool.query(
+        `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
+         VALUES (?, ?, ?, 'under_review', ?)`,
+        [req.params.id, req.user.id, req.user.role, commentText]
+      );
+    }
 
     const [rows] = await pool.query(
       `SELECT cc.*, u.full_name AS commented_by_name
@@ -835,10 +1054,167 @@ async function addComment(req, res) {
       [result.insertId]
     );
 
-    return res.status(201).json(rows[0]);
+    const updated = await getComplaintByIdRaw(req.params.id);
+    const recipients = [updated.filed_by_email, updated.tagged_sector_lead_email].filter(
+      (email) => email && email !== req.user.email
+    );
+    notifyComplaintComment({
+      complaint: updated,
+      recipientEmails: recipients,
+      authorName: req.user.full_name || req.user.email,
+      comment: commentText,
+    }).catch(() => {});
+
+    return res.status(201).json({
+      ...rows[0],
+      complaint_status: updated.status,
+      capabilities: buildComplaintCapabilities(req, updated),
+    });
   } catch (err) {
     console.error('Add complaint comment error:', err.message);
     return res.status(500).json({ error: 'Failed to add comment' });
+  }
+}
+
+async function escalateComplaint(req, res) {
+  try {
+    const complaint = await getComplaintByIdRaw(req.params.id);
+    const access = checkEscalateAccess(req, complaint);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const reason = req.body?.comment ? String(req.body.comment).trim() : null;
+
+    await pool.query(
+      `UPDATE complaints
+       SET status = 'escalated', escalated_at = NOW(), escalated_by = ?, awaiting_sector_lead = 0
+       WHERE id = ?`,
+      [req.user.id, req.params.id]
+    );
+
+    await pool.query(
+      `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
+       VALUES (?, ?, ?, 'escalated', ?)`,
+      [req.params.id, req.user.id, req.user.role, reason]
+    );
+
+    if (reason) {
+      await pool.query(
+        `INSERT INTO complaint_comments
+          (complaint_id, commented_by, commented_by_role, comment, visibility)
+         VALUES (?, ?, ?, ?, 'public')`,
+        [req.params.id, req.user.id, req.user.role, reason]
+      );
+    }
+
+    const updated = await getComplaintByIdRaw(req.params.id);
+    const admins = await findSuperAdminUserIds();
+    notifyComplaintEscalated({
+      complaint: updated,
+      superAdminEmails: admins.map((a) => a.email),
+      filerEmail: updated.filed_by_email,
+      sectorLeadEmail: updated.tagged_sector_lead_email,
+    }).catch(() => {});
+
+    return res.json(await enrichComplaint(updated, req));
+  } catch (err) {
+    console.error('Escalate complaint error:', err.message);
+    return res.status(500).json({ error: 'Failed to escalate complaint' });
+  }
+}
+
+async function reopenComplaint(req, res) {
+  try {
+    const complaint = await getComplaintByIdRaw(req.params.id);
+    const access = checkReopenAccess(req, complaint);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const reason = req.body?.comment ? String(req.body.comment).trim() : null;
+    if (!reason) {
+      return res.status(400).json({ error: 'Comment is required when reopening a complaint' });
+    }
+
+    const dueAt = new Date(Date.now() + SLA_DAYS * 24 * 60 * 60 * 1000);
+    const assignee = await getUserById(complaint.tagged_sector_lead);
+    const awaitingSectorLead = assignee?.role === 'super_admin' ? 1 : 0;
+
+    await pool.query(
+      `UPDATE complaints
+       SET status = 'open',
+           resolution_comment = NULL,
+           reopened_at = NOW(),
+           under_review_at = NULL,
+           due_at = ?,
+           awaiting_sector_lead = ?
+       WHERE id = ?`,
+      [dueAt, awaitingSectorLead, req.params.id]
+    );
+
+    await pool.query(
+      `INSERT INTO complaint_actions (complaint_id, action_by, action_by_role, action, comment)
+       VALUES (?, ?, ?, 'reopened', ?)`,
+      [req.params.id, req.user.id, req.user.role, reason]
+    );
+
+    await pool.query(
+      `INSERT INTO complaint_comments
+        (complaint_id, commented_by, commented_by_role, comment, visibility)
+       VALUES (?, ?, ?, ?, 'public')`,
+      [req.params.id, req.user.id, req.user.role, reason]
+    );
+
+    const updated = await getComplaintByIdRaw(req.params.id);
+    notifyComplaintStatusChange({
+      complaint: updated,
+      filerEmail: updated.filed_by_email,
+      sectorLeadEmail: updated.tagged_sector_lead_email,
+      outcomeLabel: 'reopened',
+      comment: reason,
+    }).catch(() => {});
+
+    return res.json(await enrichComplaint(updated, req));
+  } catch (err) {
+    console.error('Reopen complaint error:', err.message);
+    return res.status(500).json({ error: 'Failed to reopen complaint' });
+  }
+}
+
+async function getComplaintStats(req, res) {
+  try {
+    const [[counts]] = await pool.query(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(status = 'open') AS open_count,
+         SUM(status = 'under_review') AS under_review_count,
+         SUM(status = 'escalated') AS escalated_count,
+         SUM(status = 'resolved') AS resolved_count,
+         SUM(status = 'rejected') AS rejected_count,
+         SUM(awaiting_sector_lead = 1 AND status IN ('open','under_review','escalated')) AS awaiting_sector_lead_count,
+         SUM(
+           due_at IS NOT NULL
+           AND due_at < NOW()
+           AND status IN ('open','under_review','escalated')
+         ) AS overdue_count
+       FROM complaints`
+    );
+
+    return res.json({
+      total: Number(counts.total) || 0,
+      open: Number(counts.open_count) || 0,
+      under_review: Number(counts.under_review_count) || 0,
+      escalated: Number(counts.escalated_count) || 0,
+      resolved: Number(counts.resolved_count) || 0,
+      rejected: Number(counts.rejected_count) || 0,
+      awaiting_sector_lead: Number(counts.awaiting_sector_lead_count) || 0,
+      overdue: Number(counts.overdue_count) || 0,
+      sla_days: SLA_DAYS,
+    });
+  } catch (err) {
+    console.error('Get complaint stats error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch complaint stats' });
   }
 }
 
@@ -850,9 +1226,13 @@ module.exports = {
   getForwardedComplaints,
   getPartyBAssignedComplaints,
   getAllComplaints,
+  getComplaintFilterOptions,
+  getComplaintStats,
   getComplaintById,
   approveComplaint,
   rejectComplaint,
+  escalateComplaint,
+  reopenComplaint,
   forwardComplaint,
   returnToSectorLead,
   tagPartyB,

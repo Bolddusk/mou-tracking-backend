@@ -29,6 +29,7 @@
     "db:migrate:poke-workflow": "node server/scripts/migratePokeWorkflow.js",
     "db:migrate:complaints": "node server/scripts/migrateComplaints.js",
     "db:migrate:complaint-workflow": "node server/scripts/migrateComplaintWorkflow.js",
+    "db:migrate:complaint-professional": "node server/scripts/migrateComplaintProfessional.js",
     "db:migrate:party-b": "node server/scripts/migratePartyB.js",
     "db:migrate:party-b-info": "node server/scripts/migratePartyBInfo.js",
     "db:migrate:password-change": "node server/scripts/migratePasswordChange.js",

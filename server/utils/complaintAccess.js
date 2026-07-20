@@ -53,7 +53,7 @@ function checkSectorLeadReviewAccess(req, complaint) {
   if (
     role === 'sector_lead' &&
     complaint.tagged_sector_lead === userId &&
-    ['open', 'under_review', 'returned_to_sector_lead'].includes(complaint.status)
+    ['open', 'under_review', 'returned_to_sector_lead', 'escalated'].includes(complaint.status)
   ) {
     return { ok: true };
   }
@@ -93,6 +93,42 @@ function checkComplaintReviewAccess(req, complaint) {
   return { ok: false, status: 403, error: 'Access denied' };
 }
 
+function checkEscalateAccess(req, complaint) {
+  if (!complaint) return { ok: false, status: 404, error: 'Complaint not found' };
+  const { role, id: userId } = req.user;
+  if (!['open', 'under_review'].includes(complaint.status)) {
+    return { ok: false, status: 400, error: 'Only open or under-review complaints can be escalated' };
+  }
+  if (complaint.escalated_at || complaint.status === 'escalated') {
+    return { ok: false, status: 400, error: 'Complaint is already escalated' };
+  }
+  if (role === 'super_admin') return { ok: true };
+  if (role === 'party_a' || role === 'party_b') {
+    if (complaint.filed_by === userId) return { ok: true };
+  }
+  if (role === 'sector_lead' && complaint.tagged_sector_lead === userId) return { ok: true };
+  return { ok: false, status: 403, error: 'Access denied' };
+}
+
+function checkReopenAccess(req, complaint) {
+  if (!complaint) return { ok: false, status: 404, error: 'Complaint not found' };
+  if (complaint.status !== 'rejected') {
+    return { ok: false, status: 400, error: 'Only rejected complaints can be reopened' };
+  }
+  const { role, id: userId } = req.user;
+  if (role === 'super_admin') return { ok: true };
+  if ((role === 'party_a' || role === 'party_b') && complaint.filed_by === userId) {
+    return { ok: true };
+  }
+  return { ok: false, status: 403, error: 'Access denied' };
+}
+
+function isComplaintOverdue(complaint) {
+  if (!complaint?.due_at) return false;
+  if (!['open', 'under_review', 'escalated'].includes(complaint.status)) return false;
+  return new Date(complaint.due_at).getTime() < Date.now();
+}
+
 function canViewInternalTimeline(role) {
   return ['sector_lead', 'regional_focal_point', 'super_admin'].includes(role);
 }
@@ -118,6 +154,9 @@ module.exports = {
   checkSectorLeadReviewAccess,
   checkRfpReviewAccess,
   checkComplaintReviewAccess,
+  checkEscalateAccess,
+  checkReopenAccess,
+  isComplaintOverdue,
   canViewInternalTimeline,
   resolveCommentVisibility,
 };

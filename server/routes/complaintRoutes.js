@@ -9,9 +9,13 @@ const {
   getForwardedComplaints,
   getPartyBAssignedComplaints,
   getAllComplaints,
+  getComplaintFilterOptions,
+  getComplaintStats,
   getComplaintById,
   approveComplaint,
   rejectComplaint,
+  escalateComplaint,
+  reopenComplaint,
   forwardComplaint,
   returnToSectorLead,
   tagPartyB,
@@ -44,6 +48,7 @@ const allComplaintRoles = [
   verifyToken,
   requireRole('party_a', 'party_b', 'sector_lead', 'super_admin', 'regional_focal_point'),
 ];
+const reopenRoles = [verifyToken, requireRole('party_a', 'party_b', 'super_admin')];
 
 router.post(
   '/upload',
@@ -57,6 +62,8 @@ router.get('/my', ...partyAB, getMyComplaints);
 router.get('/party-b-assigned', ...partyB, getPartyBAssignedComplaints);
 router.get('/sector', ...sectorLead, getSectorComplaints);
 router.get('/forwarded', ...regionalFocalPoint, getForwardedComplaints);
+router.get('/filter-options', ...superAdmin, getComplaintFilterOptions);
+router.get('/stats', ...superAdmin, getComplaintStats);
 router.get('/all', ...superAdmin, getAllComplaints);
 
 router.post(
@@ -70,6 +77,8 @@ router.post(
 router.get('/:id', ...allComplaintRoles, getComplaintById);
 router.patch('/:id/approve', ...reviewers, approveComplaint);
 router.patch('/:id/reject', ...reviewers, rejectComplaint);
+router.post('/:id/escalate', ...allComplaintRoles, escalateComplaint);
+router.post('/:id/reopen', ...reopenRoles, reopenComplaint);
 router.patch('/:id/forward', ...sectorLead, forwardComplaint);
 router.patch('/:id/return', ...regionalFocalPoint, returnToSectorLead);
 router.post('/:id/tag-party-b', ...regionalFocalPoint, tagPartyB);

@@ -25,7 +25,20 @@ GET /api/proposals/conference-report
 
 | Param | Example |
 |-------|---------|
-| `conference_key` | `pak-china-may-24-b2b` |
+| — | `conference_key` **optional** |
+
+### Conference scope
+
+| UI selection | Query |
+|--------------|--------|
+| **All conferences** | omit `conference_key` **or** `conference_key=all` |
+| Specific conference | `conference_key=pak-china-may-24-b2b` |
+
+```
+GET /api/proposals/conference-report?format=pdf
+GET /api/proposals/conference-report?conference_key=all&format=xlsx
+GET /api/proposals/conference-report?conference_key=pak-china-may-24-b2b&format=pdf
+```
 
 ### Format
 
@@ -59,7 +72,7 @@ Pass **the same query string** you use for `GET /api/proposals/all` (or sector-l
 ```ts
 // Current Opportunities filters + selected conference
 function buildSifcReportQuery(filters: {
-  conference_key: string;
+  conference_key?: string | null; // omit / 'all' / null → All conferences
   sector?: string;
   cooperation_mode?: string;
   sifc_category?: string;
@@ -72,8 +85,12 @@ function buildSifcReportQuery(filters: {
   download?: '1';
 }) {
   const params = new URLSearchParams();
-  params.set('conference_key', filters.conference_key);
   params.set('format', filters.format || 'json');
+
+  const key = filters.conference_key;
+  if (key && key !== 'all' && key !== 'all_conferences') {
+    params.set('conference_key', key);
+  }
 
   const optional = [
     'sector',
@@ -124,7 +141,12 @@ window.open(
 
 ### Examples
 
-**General (no filters — old behaviour):**
+**General (All conferences):**
+```
+GET /api/proposals/conference-report?format=pdf
+```
+
+**General (one conference — old behaviour):**
 ```
 GET /api/proposals/conference-report?conference_key=pak-china-may-24-b2b&format=pdf
 ```
@@ -132,6 +154,11 @@ GET /api/proposals/conference-report?conference_key=pak-china-may-24-b2b&format=
 **Filtered (matches screenshot: MoU + Seed Sales):**
 ```
 GET /api/proposals/conference-report?conference_key=pak-china-may-24-b2b&cooperation_mode=mou&sector=Seed%20Sales&format=pdf
+```
+
+**All conferences + sector filter:**
+```
+GET /api/proposals/conference-report?sector=Agricultural%20Biotechnology&format=pdf
 ```
 
 ---
@@ -183,7 +210,7 @@ Show buttons when conference has `supports_report === true`.
 
 | Code | When |
 |------|------|
-| 400 | Missing `conference_key` / invalid filter / invalid format |
+| 400 | Invalid filter / invalid format |
 | 403 | Role not allowed / conference not reportable / SL sector outside scope |
 | 404 | Unknown `conference_key` |
 | 503 | PDF Chromium missing — use Excel |
@@ -192,8 +219,10 @@ Show buttons when conference has `supports_report === true`.
 
 ## Checklist
 
+- [ ] Buttons show for **All conferences** and specific conference
+- [ ] All conferences → call **without** `conference_key` (or `=all`)
 - [ ] Preview/PDF/Excel use **same** filter state as Opportunities table
-- [ ] Clearing filters → full conference report again
+- [ ] Clearing filters → full report again (all or one conference)
 - [ ] Sector Lead cannot pass another sector
 - [ ] Party A/B only get their own MOUs in the report
 - [ ] Empty filter result → empty report (0 rows), not an error
