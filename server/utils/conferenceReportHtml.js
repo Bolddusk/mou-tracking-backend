@@ -124,14 +124,21 @@ function buildDetailSection(title, columns, rows) {
 }
 
 function buildConferenceReportHtml(report) {
+  const filters = report.scope?.filters || {};
+  const selectedSector = filters.sector ? String(filters.sector).trim() : '';
+  const sectorMeta = selectedSector
+    ? ` · Sector: ${escapeHtml(selectedSector)}`
+    : '';
+
   const executionCols = [
     { key: 'sr', label: 'Sr' },
     { key: 'pak_company', label: 'Pak. company' },
     { key: 'chinese_company', label: 'Chinese company' },
+    { key: 'sector', label: 'Sector' },
     { key: 'mou_value_usd_m', label: 'MoU Value (USD M) / location' },
     { key: 'outcome', label: 'Outcome' },
     { key: 'status_feedback', label: 'Status/Feedback', wrap: true },
-    { key: 'action_taken', label: 'Action Taken' },
+    { key: 'bottlenecks', label: 'Bottleneck' },
     { key: 'tentative_timeline', label: 'Tentative Timelines' },
   ];
 
@@ -139,10 +146,11 @@ function buildConferenceReportHtml(report) {
     { key: 'sr', label: 'Sr' },
     { key: 'pak_company', label: 'Pak. company' },
     { key: 'chinese_company', label: 'Chinese company' },
+    { key: 'sector', label: 'Sector' },
     { key: 'mou_value_usd_m', label: 'MoU Value (USD M) / location' },
     { key: 'product', label: 'Product' },
     { key: 'status_feedback', label: 'Status/Feedback', wrap: true },
-    { key: 'bottlenecks', label: 'Bottlenecks' },
+    { key: 'bottlenecks', label: 'Bottleneck' },
     { key: 'tentative_timeline', label: 'Tentative Timelines' },
   ];
 
@@ -195,7 +203,7 @@ function buildConferenceReportHtml(report) {
   <div class="snapshot-page">
     <h1>${escapeHtml(report.conference.report_title)}</h1>
     <h2>${escapeHtml(report.conference.name)}</h2>
-    <div class="meta">Generated: ${escapeHtml(report.generated_at)}</div>
+    <div class="meta">Generated: ${escapeHtml(report.generated_at)}${sectorMeta}</div>
     ${buildSnapshotTable(report)}
   </div>
   ${buildDetailSection('MoUs in Execution', executionCols, report.sections.in_execution)}

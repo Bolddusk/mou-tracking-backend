@@ -192,6 +192,29 @@ GET /api/proposals/conference-report?sector=Agricultural%20Biotechnology&format=
 Use `proposal_count` / `scope.filters_applied` in UI subtitle, e.g.  
 `SIFC report · 2 MOUs (filtered)` vs `SIFC report · 48 MOUs`.
 
+### Sector in subtitle (required)
+
+When a sector filter is selected, **do not** show `All sectors (filtered)`.
+
+```ts
+const sector = report.scope?.filters?.sector; // e.g. "Seed Sales"
+const sectorLabel = sector ? sector : 'All sectors';
+// subtitle example:
+// `All conferences · ${report.proposal_count} MOUs · ${sectorLabel}`
+```
+
+PDF/Excel HTML also prints `Sector: <name>` in the meta line when filtered.
+
+### Detail table columns (backend HTML / PDF / Excel)
+
+**MoUs in Execution** now includes:
+- Sector
+- **Bottleneck** (from `bottlenecks`) — **not** Action Taken
+
+**Active / Inactive** also include Sector + Bottleneck.
+
+Row JSON still has `action_taken` for compatibility; preview tables should use `bottlenecks` + `sector` if you render columns client-side.
+
 ---
 
 ## Buttons (your dashboard)
@@ -226,3 +249,5 @@ Show buttons when conference has `supports_report === true`.
 - [ ] Sector Lead cannot pass another sector
 - [ ] Party A/B only get their own MOUs in the report
 - [ ] Empty filter result → empty report (0 rows), not an error
+- [ ] Selected sector → subtitle shows sector name (not “All sectors”)
+- [ ] Execution table shows Bottleneck + Sector (not Action Taken)
