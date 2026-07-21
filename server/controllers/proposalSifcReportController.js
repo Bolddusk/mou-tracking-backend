@@ -9,7 +9,7 @@ const {
 } = require('../utils/singleMouSifcReportFormats');
 const { checkProposalAccess } = require('../utils/proposalAccess');
 
-const REPORT_ROLES = new Set(['super_admin', 'admin', 'sector_lead']);
+const REPORT_ROLES = new Set(['super_admin', 'admin', 'power_admin', 'sector_lead']);
 
 function reportDownloadBasename(proposalId) {
   return `SIFC-report-mou-${proposalId}`;

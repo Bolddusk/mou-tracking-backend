@@ -79,10 +79,14 @@ async function fetchPaginatedProposalList(req, res, options = {}) {
   }
 
   const { page, limit, offset } = parsePagination(req.query);
+  const { getMinistryFilter } = require('../utils/ministryScope');
+  const ministryId = getMinistryFilter(req.user, req.query.ministry_id);
+
   const { sql, params } = buildProposalListWhere(req.query, {
     sectorScopes,
     sectorScope: options.sectorScope,
     allowIncludeDeleted: options.allowIncludeDeleted,
+    ministryId,
   });
 
   const countQuery = `SELECT COUNT(*) AS total ${PROPOSAL_LIST_FROM_SQL}${sql}`;
@@ -106,6 +110,17 @@ async function fetchPaginatedProposalList(req, res, options = {}) {
     },
   }));
 
+  const ministryIdForEcho = ministryId || req.query.ministry_id || null;
+  let mou_lifecycle_counts = null;
+  if (['super_admin', 'admin', 'power_admin', 'sector_lead'].includes(req.user.role)) {
+    mou_lifecycle_counts = await fetchMouLifecycleSummaryCounts(pool, req.query, {
+      sectorScopes,
+      sectorScope: options.sectorScope,
+      ministryId,
+      allowIncludeDeleted: options.allowIncludeDeleted,
+    });
+  }
+
   return res.json({
     data,
     pagination: {
@@ -116,7 +131,12 @@ async function fetchPaginatedProposalList(req, res, options = {}) {
       has_next: page < totalPages,
       has_prev: page > 1,
     },
-    filters: buildListFiltersEcho(req.query, { sectorScopes, sectorScope: options.sectorScope }),
+    filters: buildListFiltersEcho(req.query, {
+      sectorScopes,
+      sectorScope: options.sectorScope,
+      ministryId: ministryIdForEcho,
+    }),
+    mou_lifecycle_counts,
   });
 }
 
@@ -125,6 +145,9 @@ async function getSectorLeadProposals(req, res) {
     const sectorScopes = getSectorLeadScopedSectors(req.user);
     if (!sectorScopes.length) {
       return res.status(400).json({ error: 'Sector lead profile has no sector assigned' });
+    }
+    if (!req.user.ministry_id) {
+      return res.status(403).json({ error: 'Sector lead has no ministry assigned' });
     }
 
     return fetchPaginatedProposalList(req, res, { sectorScopes });
@@ -136,7 +159,12 @@ async function getSectorLeadProposals(req, res) {
 
 async function getAllProposals(req, res) {
   try {
-    return fetchPaginatedProposalList(req, res, { allowIncludeDeleted: true });
+    return fetchPaginatedProposalList(req, res, {
+      allowIncludeDeleted:
+        req.user.role === 'super_admin' ||
+        req.user.role === 'admin' ||
+        req.user.role === 'power_admin',
+    });
   } catch (err) {
     console.error('All proposals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch proposals' });
@@ -161,6 +189,12 @@ async function getProposalFilterOptions(req, res) {
       conferenceWhere += ` AND sector IN (${sectorScopes.map(() => '?').join(', ')})`;
       conferenceParams.push(...sectorScopes);
     }
+    const { getMinistryFilter } = require('../utils/ministryScope');
+    const ministryId = getMinistryFilter(req.user, req.query.ministry_id);
+    if (ministryId) {
+      conferenceWhere += ' AND ministry_id = ?';
+      conferenceParams.push(ministryId);
+    }
 
     const [conferences] = await pool.query(
       `SELECT
@@ -179,12 +213,18 @@ async function getProposalFilterOptions(req, res) {
 
     const sectors = sectorScopes?.length ? sectorScopes : getActiveSectorNames();
     const sifcCategories = (await listActiveSifcCategories()).map((row) => row.name);
-    const staffDashboardRole = ['super_admin', 'admin', 'sector_lead'].includes(req.user.role);
+
+    const staffDashboardRole = ['super_admin', 'admin', 'power_admin', 'sector_lead'].includes(
+      req.user.role
+    );
     const mou_lifecycle_counts = staffDashboardRole
-      ? await fetchMouLifecycleSummaryCounts(pool, {}, {
+      ? await fetchMouLifecycleSummaryCounts(pool, req.query, {
           sectorScopes,
+          ministryId,
           allowIncludeDeleted:
-            req.user.role === 'super_admin' || req.user.role === 'admin',
+            req.user.role === 'super_admin' ||
+            req.user.role === 'admin' ||
+            req.user.role === 'power_admin',
         })
       : null;
 
@@ -197,6 +237,7 @@ async function getProposalFilterOptions(req, res) {
       dashboard_list_tab_filters: staffDashboardRole ? DASHBOARD_LIST_TAB_FILTERS : null,
       dashboard_list_filter_param: staffDashboardRole ? 'mou_lifecycle' : null,
       mou_lifecycle_counts,
+      ministry_id: ministryId || req.query.ministry_id || null,
       cooperation_modes: COOPERATION_MODES.map((value) => ({
         value,
         label: COOPERATION_MODE_LABELS[value],
@@ -246,7 +287,8 @@ async function getProposalDetail(req, res) {
     const capabilities = {
       ...buildProposalCapabilities(req, proposal, access, userPermissions),
       ...updateRequest,
-      can_dismiss_all_pending_update_requests: req.user.role === 'super_admin',
+      can_dismiss_all_pending_update_requests:
+        req.user.role === 'super_admin' || req.user.role === 'power_admin',
       can_change_sector: canChangeProposalSector(req.user) && !isProposalArchived(proposal),
       can_archive_proposal:
         canArchiveProposals(req.user) && !isProposalArchived(proposal) && proposal.status !== 'draft',

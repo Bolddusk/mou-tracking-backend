@@ -9,12 +9,20 @@ const {
   hasMeaningfulProposalDraft,
 } = require('../utils/proposalTemplate');
 const { logProposalUpdates, logProposalAction, recordProposalChangeLog } = require('../utils/proposalChangeLog');
+const {
+  resolveMinistryIdForWrite,
+  isSuperAdmin,
+  isPowerAdmin,
+} = require('../utils/ministryScope');
 
 async function getOwnedProposal(proposalId, user) {
   const [rows] = await pool.query('SELECT * FROM proposals WHERE id = ?', [proposalId]);
   const proposal = rows[0] || null;
   if (!proposal) return null;
-  if (user.role === 'super_admin' || user.role === 'admin') return proposal;
+  if (isSuperAdmin(user) || isPowerAdmin(user)) return proposal;
+  if (user.role === 'admin' && Number(proposal.ministry_id) === Number(user.ministry_id)) {
+    return proposal;
+  }
   if (proposal.party_a_id === user.id) return proposal;
   return null;
 }
@@ -28,10 +36,36 @@ async function saveDraft(req, res) {
       const existing = await getOwnedProposal(proposalId, req.user);
       if (existing) {
         if (
-          req.user.role !== 'super_admin' &&
+          !isSuperAdmin(req.user) &&
+          !isPowerAdmin(req.user) &&
           !['draft', 'rejected'].includes(existing.status)
         ) {
           return res.status(400).json({ error: 'Only draft proposals can be edited' });
+        }
+
+        if (body.ministry_id !== undefined && (isSuperAdmin(req.user) || isPowerAdmin(req.user))) {
+          const ministryWrite = await resolveMinistryIdForWrite(req.user, body.ministry_id);
+          if (ministryWrite.error) {
+            return res.status(ministryWrite.status).json({ error: ministryWrite.error });
+          }
+          updates.ministry_id = ministryWrite.ministryId;
+        }
+
+        if (updates.conference_key || body.conference_key) {
+          const key = updates.conference_key || body.conference_key;
+          if (key && key !== 'all') {
+            const [confRows] = await pool.query(
+              `SELECT ministry_id FROM conferences WHERE conference_key = ? LIMIT 1`,
+              [key]
+            );
+            const conf = confRows[0];
+            const ministryId = updates.ministry_id || existing.ministry_id;
+            if (conf && ministryId && Number(conf.ministry_id) !== Number(ministryId)) {
+              return res.status(400).json({
+                error: 'Conference does not belong to the selected ministry',
+              });
+            }
+          }
         }
 
         if (Object.keys(updates).length > 0) {
@@ -64,6 +98,31 @@ async function saveDraft(req, res) {
       });
     }
 
+    const ministryWrite = await resolveMinistryIdForWrite(
+      req.user,
+      body.ministry_id ?? req.user.ministry_id
+    );
+    if (ministryWrite.error) {
+      return res.status(ministryWrite.status).json({ error: ministryWrite.error });
+    }
+
+    if (body.conference_key && body.conference_key !== 'all') {
+      const [confRows] = await pool.query(
+        `SELECT ministry_id FROM conferences WHERE conference_key = ? LIMIT 1`,
+        [body.conference_key]
+      );
+      if (
+        confRows[0] &&
+        Number(confRows[0].ministry_id) !== Number(ministryWrite.ministryId)
+      ) {
+        return res.status(400).json({
+          error: 'Conference does not belong to the selected ministry',
+        });
+      }
+    }
+
+    updates.ministry_id = ministryWrite.ministryId;
+
     const cols = ['party_a_id', 'status', ...Object.keys(updates)];
     const placeholders = cols.map(() => '?').join(', ');
     const values = [req.user.id, 'draft', ...Object.values(updates)];
@@ -84,6 +143,7 @@ async function saveDraft(req, res) {
     return res.status(201).json({
       proposal_id: result.insertId,
       status: 'draft',
+      ministry_id: ministryWrite.ministryId,
     });
   } catch (err) {
     console.error('Save draft error:', err.message);

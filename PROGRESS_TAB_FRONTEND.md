@@ -287,7 +287,28 @@ POST /api/activities/:activityId/comments
 { "comment": "Please update bottleneck details" }
 ```
 
-**Roles:** `sector_lead`, `super_admin`, `admin`, `party_a`, `party_b`
+**Roles that can comment:** `sector_lead`, `super_admin`, `admin`, `power_admin`, `party_a`, `party_b`
+
+**Add Progress Update button** — do **not** hardcode `super_admin` only. Use:
+
+```json
+GET /api/proposals/:id/activities
+→ { "can_add_progress": true, "can_comment": true, ... }
+```
+
+or proposal detail:
+
+```json
+capabilities.can_add_activity === true
+```
+
+`power_admin` is allowed same as Super Admin (approved + unlocked MOUs).
+
+```tsx
+{(data.can_add_progress || caps?.can_add_activity) && (
+  <button>+ Add Progress Update</button>
+)}
+```
 
 **Response `201`:**
 

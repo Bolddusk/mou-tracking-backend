@@ -5,6 +5,7 @@ const {
   getSectorLeads,
   getRegionalFocalPoints,
   getRoles,
+  getUserTabs,
   listUsers,
   getUserById,
   createUser,
@@ -40,6 +41,7 @@ router.get(
 
 // Super Admin — user management (permission-gated; super_admin middleware bypass in hasPermission)
 router.get('/roles', ...userList, getRoles);
+router.get('/tabs', ...userList, getUserTabs);
 router.get('/', ...userList, listUsers);
 router.post('/', ...userCreate, createUser);
 router.get('/:id', ...userList, getUserById);

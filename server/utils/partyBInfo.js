@@ -142,11 +142,8 @@ function buildPartyBContactUpdates(body, existingProposal) {
     ...syncFlatColumnsFromPartyBInfo(nextInfo),
   };
 
-  if (body.party_b_info?.organization_name !== undefined && nextInfo.organization_name) {
-    updates.venture_name = nextInfo.organization_name;
-  } else if (body.party_b_organization !== undefined && nextInfo.organization_name) {
-    updates.venture_name = nextInfo.organization_name;
-  }
+  // Do NOT overwrite venture_name here — it is often a combined title
+  // ("Chinese x Pakistani") and is edited via proposal fields, not contacts.
 
   return { nextInfo, updates };
 }

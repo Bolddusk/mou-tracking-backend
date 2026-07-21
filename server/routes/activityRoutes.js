@@ -22,11 +22,11 @@ const router = express.Router();
 
 const activityRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'sector_lead', 'super_admin', 'admin'),
+  requireRole('party_a', 'party_b', 'sector_lead', 'super_admin', 'admin', 'power_admin'),
 ];
-const reviewerRoles = [verifyToken, requireRole('sector_lead', 'super_admin', 'admin')];
+const reviewerRoles = [verifyToken, requireRole('sector_lead', 'super_admin', 'admin', 'power_admin')];
 const sectorLeadRoles = [verifyToken, requireRole('sector_lead')];
-const adminRoles = [verifyToken, requireRole('super_admin', 'admin')];
+const adminRoles = [verifyToken, requireRole('super_admin', 'admin', 'power_admin')];
 
 router.post(
   '/upload',
@@ -46,21 +46,21 @@ router.post(
 router.patch(
   '/:activityId/poke-response',
   verifyToken,
-  requireRole('sector_lead', 'super_admin', 'admin'),
+  requireRole('sector_lead', 'super_admin', 'admin', 'power_admin'),
   editPokeResponse
 );
 
 router.post(
   '/:activityId/promote-to-progress',
   verifyToken,
-  requireRole('sector_lead', 'super_admin', 'admin'),
+  requireRole('sector_lead', 'super_admin', 'admin', 'power_admin'),
   promotePokeToProgress
 );
 
 router.post(
   '/:activityId/dismiss-update-request',
   verifyToken,
-  requireRole('super_admin'),
+  requireRole('super_admin', 'power_admin'),
   dismissUpdateRequestActivity
 );
 

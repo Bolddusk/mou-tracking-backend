@@ -4,7 +4,7 @@ const { buildPartyAContactsDisplay } = require('./partyContactsDisplay');
 const { isProposalLocked } = require('./dealClose');
 const { POKE_TITLE } = require('./progressActivity');
 
-const REVIEWER_ROLES = new Set(['sector_lead', 'super_admin', 'admin']);
+const REVIEWER_ROLES = new Set(['sector_lead', 'super_admin', 'admin', 'power_admin']);
 
 function resolvePartyAEmail(proposalRow) {
   if (!proposalRow) return null;
@@ -58,7 +58,7 @@ function buildPokeWorkflowCapabilities(req, proposal, poke) {
     can_edit_update_response: isReviewer && status === 'awaiting_review',
     can_promote_update_to_progress: isReviewer && status === 'awaiting_review',
     can_dismiss_update_request:
-      role === 'super_admin' && poke && status !== 'none',
+      (role === 'super_admin' || role === 'power_admin') && poke && status !== 'none',
   };
 }
 

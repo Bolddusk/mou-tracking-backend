@@ -4,9 +4,11 @@ const { issueTemporaryCredentials } = require('../utils/partyBCredentials');
 const {
   VALID_ROLES,
   ROLE_LABELS,
+  USER_TABS,
   formatPublicUser,
   isValidRole,
   roleRequiresSector,
+  getTabByKey,
 } = require('../utils/userHelpers');
 const { getPermissionsForRole } = require('../utils/rolePermissions');
 const {
@@ -16,7 +18,7 @@ const {
 } = require('../utils/userDeleteReferences');
 
 const USER_SELECT = `
-  SELECT id, full_name, email, role, sector, organization, phone, created_at
+  SELECT id, full_name, email, role, ministry_id, sector, organization, phone, created_at
   FROM users
 `;
 
@@ -38,10 +40,12 @@ async function countSuperAdmins(excludeId = null) {
 
 function validateRoleAndSector(role, sector) {
   if (!isValidRole(role)) {
-    return { error: `Invalid role. Allowed: ${VALID_ROLES.join(', ')}` };
+    return {
+      error: `Invalid role. Allowed: ${VALID_ROLES.join(', ')}. Investor and Focal Point roles are removed.`,
+    };
   }
   if (roleRequiresSector(role) && !sector?.trim()) {
-    return { error: 'sector is required for sector_lead and regional_focal_point' };
+    return { error: 'sector is required for sector_lead' };
   }
   return { ok: true };
 }
@@ -118,18 +122,67 @@ async function getRoles(req, res) {
   }
 }
 
+async function getUserTabs(req, res) {
+  try {
+    const tabs = [];
+    for (const tab of USER_TABS) {
+      const placeholders = tab.roles.map(() => '?').join(', ');
+      const [[row]] = await pool.query(
+        `SELECT COUNT(*) AS count FROM users WHERE role IN (${placeholders})`,
+        tab.roles
+      );
+      tabs.push({
+        key: tab.key,
+        label: tab.label,
+        count: Number(row.count) || 0,
+      });
+    }
+    return res.json({ tabs });
+  } catch (err) {
+    console.error('Get user tabs error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch user tabs' });
+  }
+}
+
 async function listUsers(req, res) {
   try {
-    const { role, search } = req.query;
+    const { role, search, tab, ministry_id } = req.query;
     const conditions = [];
     const params = [];
 
-    if (role) {
+    const { isGlobalRole, getMinistryFilter } = require('../utils/ministryScope');
+    const ministryFilter = getMinistryFilter(req.user, ministry_id);
+    if (!isGlobalRole(req.user) && req.user.ministry_id) {
+      conditions.push('ministry_id = ?');
+      params.push(req.user.ministry_id);
+    } else if (ministryFilter) {
+      conditions.push('ministry_id = ?');
+      params.push(ministryFilter);
+    }
+
+    const tabDef = getTabByKey(tab);
+    if (tab && !tabDef) {
+      return res.status(400).json({
+        error: `Invalid tab. Use: ${USER_TABS.map((t) => t.key).join(', ')}`,
+      });
+    }
+
+    if (tabDef) {
+      const placeholders = tabDef.roles.map(() => '?').join(', ');
+      conditions.push(`role IN (${placeholders})`);
+      params.push(...tabDef.roles);
+    } else if (role) {
       if (!isValidRole(role)) {
-        return res.status(400).json({ error: 'Invalid role filter' });
+        return res.status(400).json({
+          error: 'Invalid role filter. Investor and Focal Point are removed from user management.',
+        });
       }
       conditions.push('role = ?');
       params.push(role);
+    } else {
+      const placeholders = VALID_ROLES.map(() => '?').join(', ');
+      conditions.push(`role IN (${placeholders})`);
+      params.push(...VALID_ROLES);
     }
 
     if (search?.trim()) {
@@ -145,7 +198,38 @@ async function listUsers(req, res) {
       params
     );
 
-    return res.json(rows.map(formatPublicUser));
+    const tabCountConditions = [];
+    const tabCountParams = [];
+    if (!isGlobalRole(req.user) && req.user.ministry_id) {
+      tabCountConditions.push('ministry_id = ?');
+      tabCountParams.push(req.user.ministry_id);
+    } else if (ministryFilter) {
+      tabCountConditions.push('ministry_id = ?');
+      tabCountParams.push(ministryFilter);
+    }
+
+    const tabs = [];
+    for (const t of USER_TABS) {
+      const placeholders = t.roles.map(() => '?').join(', ');
+      const parts = [`role IN (${placeholders})`, ...tabCountConditions];
+      const [[row]] = await pool.query(
+        `SELECT COUNT(*) AS count FROM users WHERE ${parts.join(' AND ')}`,
+        [...t.roles, ...tabCountParams]
+      );
+      tabs.push({
+        key: t.key,
+        label: t.label,
+        count: Number(row.count) || 0,
+      });
+    }
+
+    return res.json({
+      data: rows.map(formatPublicUser),
+      tab: tabDef ? tabDef.key : null,
+      tabs,
+      total: rows.length,
+      ministry_id: ministryFilter || null,
+    });
   } catch (err) {
     console.error('List users error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch users' });
@@ -173,7 +257,8 @@ async function getUserById(req, res) {
 
 async function createUser(req, res) {
   try {
-    const { full_name, email, password, role, sector, organization, phone } = req.body;
+    const { full_name, email, password, role, sector, organization, phone, ministry_id } =
+      req.body;
 
     if (!full_name?.trim() || !email?.trim() || !password || !role) {
       return res.status(400).json({
@@ -190,6 +275,22 @@ async function createUser(req, res) {
       return res.status(400).json({ error: roleCheck.error });
     }
 
+    const { roleRequiresMinistry, getMinistryById } = require('../utils/ministryScope');
+    const { GLOBAL_USER_ROLES } = require('../utils/userHelpers');
+    let ministryId = null;
+    if (GLOBAL_USER_ROLES.has(role)) {
+      ministryId = null;
+    } else {
+      ministryId = ministry_id ? Number(ministry_id) : null;
+      if (!ministryId) {
+        return res.status(400).json({ error: 'ministry_id is required for this role' });
+      }
+      const ministry = await getMinistryById(ministryId);
+      if (!ministry || !ministry.is_active) {
+        return res.status(400).json({ error: 'Invalid or inactive ministry' });
+      }
+    }
+
     const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email.trim()]);
     if (existing.length > 0) {
       return res.status(409).json({ error: 'Email already registered' });
@@ -198,13 +299,14 @@ async function createUser(req, res) {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const [result] = await pool.query(
-      `INSERT INTO users (full_name, email, password, role, sector, organization, phone)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (full_name, email, password, role, ministry_id, sector, organization, phone)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         full_name.trim(),
         email.trim().toLowerCase(),
         hashedPassword,
         role,
+        ministryId,
         roleRequiresSector(role) ? sector.trim() : sector?.trim() || null,
         organization?.trim() || null,
         phone?.trim() || null,
@@ -293,7 +395,7 @@ async function changeRole(req, res) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const { role, sector } = req.body;
+    const { role, sector, ministry_id } = req.body;
     if (!role) {
       return res.status(400).json({ error: 'role is required' });
     }
@@ -322,9 +424,25 @@ async function changeRole(req, res) {
       return res.status(400).json({ error: 'sector is required for this role' });
     }
 
-    await pool.query('UPDATE users SET role = ?, sector = ? WHERE id = ?', [
+    const { GLOBAL_USER_ROLES } = require('../utils/userHelpers');
+    const { getMinistryById } = require('../utils/ministryScope');
+    let newMinistryId = user.ministry_id;
+    if (GLOBAL_USER_ROLES.has(role)) {
+      newMinistryId = null;
+    } else if (ministry_id !== undefined) {
+      newMinistryId = Number(ministry_id);
+      const ministry = await getMinistryById(newMinistryId);
+      if (!ministry) {
+        return res.status(400).json({ error: 'Invalid ministry_id' });
+      }
+    } else if (!newMinistryId) {
+      return res.status(400).json({ error: 'ministry_id is required for this role' });
+    }
+
+    await pool.query('UPDATE users SET role = ?, sector = ?, ministry_id = ? WHERE id = ?', [
       role,
       newSector,
+      newMinistryId,
       req.params.id,
     ]);
 
@@ -494,6 +612,7 @@ module.exports = {
   getSectorLeads,
   getRegionalFocalPoints,
   getRoles,
+  getUserTabs,
   listUsers,
   getUserById,
   createUser,

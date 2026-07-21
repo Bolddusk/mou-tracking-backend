@@ -2,6 +2,12 @@ const pool = require('../config/db');
 const { isProposalLocked, canCloseProposalDeal } = require('./dealClose');
 const { permissionMatchesGrant } = require('./rolePermissions');
 const { sectorLeadCoversSector, sectorLeadHasAnySector } = require('./sectorLeadAssignments');
+const {
+  isSuperAdmin,
+  isPowerAdmin,
+  isGlobalRole,
+  assertMinistryAccess,
+} = require('./ministryScope');
 
 async function getMatchForEngagement(proposalId) {
   const [rows] = await pool.query(
@@ -59,7 +65,13 @@ async function checkProposalAccess(req, proposal) {
     return { error: 'Proposal not found', status: 404 };
   }
 
-  if (['super_admin', 'admin'].includes(req.user.role)) {
+  if (isSuperAdmin(req.user) || isPowerAdmin(req.user)) {
+    return { ok: true, proposal };
+  }
+
+  if (req.user.role === 'admin') {
+    const ministryCheck = assertMinistryAccess(req.user, proposal.ministry_id);
+    if (!ministryCheck.ok) return ministryCheck;
     return { ok: true, proposal };
   }
 
@@ -91,6 +103,8 @@ async function checkProposalAccess(req, proposal) {
   }
 
   if (req.user.role === 'sector_lead') {
+    const ministryCheck = assertMinistryAccess(req.user, proposal.ministry_id);
+    if (!ministryCheck.ok) return ministryCheck;
     if (!sectorLeadHasAnySector(req.user)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
@@ -125,7 +139,7 @@ function canEditProposalFields(req, proposal, access) {
   }
 
   const locked = isProposalLocked(proposal);
-  if (locked && !['super_admin', 'admin'].includes(req.user.role)) {
+  if (locked && !['super_admin', 'admin', 'power_admin'].includes(req.user.role)) {
     return {
       ok: false,
       locked: true,
@@ -143,7 +157,7 @@ function canEditProposalFields(req, proposal, access) {
     if (req.user.role === 'party_a' && proposal.party_a_id === req.user.id) {
       return { ok: true, locked: false };
     }
-    if (['super_admin', 'admin'].includes(req.user.role)) {
+    if (['super_admin', 'admin', 'power_admin'].includes(req.user.role)) {
       return { ok: true, locked: false };
     }
     return { ok: false, error: 'Only the proposal owner can edit drafts', status: 403 };
@@ -176,11 +190,17 @@ async function checkApprovedPartyChatAccess(user, proposal) {
     return { ok: true, proposal, canSend: true, partyBLinked };
   }
 
-  if (user.role === 'super_admin' || user.role === 'admin') {
+  if (user.role === 'super_admin' || user.role === 'admin' || user.role === 'power_admin') {
+    if (user.role === 'admin') {
+      const ministryCheck = assertMinistryAccess(user, proposal.ministry_id);
+      if (!ministryCheck.ok) return ministryCheck;
+    }
     return { ok: true, proposal, canSend: true, partyBLinked };
   }
 
   if (user.role === 'sector_lead') {
+    const ministryCheck = assertMinistryAccess(user, proposal.ministry_id);
+    if (!ministryCheck.ok) return ministryCheck;
     if (!sectorLeadHasAnySector(user)) {
       return { error: 'Sector lead profile has no sector assigned', status: 400 };
     }
@@ -221,7 +241,7 @@ function isProposalOwnerForActivities(req, proposal) {
 
 function canEditMouTextFields(req, proposal) {
   const role = req.user.role;
-  if (['super_admin', 'admin'].includes(role)) return true;
+  if (['super_admin', 'admin', 'power_admin'].includes(role)) return true;
   if (role === 'party_a' && proposal.party_a_id === req.user.id) return true;
   if (role === 'party_b' && proposal.party_b_user_id === req.user.id) return true;
   return false;
@@ -244,7 +264,9 @@ function chatReady(proposal) {
 function canDeleteProposal(user, proposal) {
   if (!proposal || !user) return false;
   if (!['draft', 'rejected'].includes(proposal.status)) return false;
-  if (user.role === 'super_admin' || user.role === 'admin') return true;
+  if (user.role === 'super_admin' || user.role === 'admin' || user.role === 'power_admin') {
+    return true;
+  }
   if (user.role === 'party_a' && Number(proposal.party_a_id) === Number(user.id)) return true;
   return false;
 }
@@ -254,6 +276,7 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     can_view_chat: false,
     can_send_chat: false,
     can_add_activity: false,
+    can_comment: false,
     can_upload_mou: false,
     can_delete_mou: false,
     can_delete: false,
@@ -287,14 +310,41 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
   const canApproveReject =
     reviewable &&
     (role === 'super_admin' ||
+      role === 'power_admin' ||
       (permissionMatchesGrant('proposals.approve', perms) &&
         role === 'sector_lead' &&
         proposal.status !== 'draft' &&
         (sectorLeadCoversSector(req.user, proposal.sector) || access.viaMatchmaking)));
 
   if (canApproveReject) {
-    caps.can_approve = role === 'super_admin' || permissionMatchesGrant('proposals.approve', perms);
-    caps.can_reject = role === 'super_admin' || permissionMatchesGrant('proposals.reject', perms);
+    caps.can_approve =
+      role === 'super_admin' ||
+      role === 'power_admin' ||
+      permissionMatchesGrant('proposals.approve', perms);
+    caps.can_reject =
+      role === 'super_admin' ||
+      role === 'power_admin' ||
+      permissionMatchesGrant('proposals.reject', perms);
+  }
+
+  if (role === 'power_admin' || role === 'super_admin') {
+    caps.can_view_chat = ready && !locked;
+    caps.can_send_chat = ready && !locked;
+    caps.can_comment = true;
+    caps.can_add_activity = approvedAndOpen;
+    caps.can_upload_mou = approvedAndOpen;
+    caps.can_view_mou = mouVisible;
+    caps.can_view_companies = true;
+    caps.can_close_deal = canCloseProposalDeal(req, proposal);
+    const canEditContacts = proposal.status !== 'draft';
+    caps.can_edit_party_contacts = canEditContacts;
+    caps.can_edit_party_a_contacts = canEditContacts;
+    caps.can_edit_party_b_contacts = canEditContacts;
+    if (reviewable) {
+      caps.can_approve = true;
+      caps.can_reject = true;
+    }
+    return applyMouFieldCapabilities(req, proposal, caps);
   }
 
   if (role === 'party_a' && proposal.party_a_id === req.user.id) {
@@ -367,25 +417,6 @@ function buildProposalCapabilities(req, proposal, access, userPermissions = null
     if (reviewable) {
       caps.can_approve = permissionMatchesGrant('proposals.approve', perms);
       caps.can_reject = permissionMatchesGrant('proposals.reject', perms);
-    }
-    return applyMouFieldCapabilities(req, proposal, caps);
-  }
-
-  if (role === 'super_admin') {
-    caps.can_view_chat = ready && !locked;
-    caps.can_send_chat = ready && !locked;
-    caps.can_add_activity = approvedAndOpen;
-    caps.can_upload_mou = approvedAndOpen;
-    caps.can_view_mou = mouVisible;
-    caps.can_view_companies = true;
-    caps.can_close_deal = canCloseProposalDeal(req, proposal);
-    const canEditContacts = proposal.status !== 'draft';
-    caps.can_edit_party_contacts = canEditContacts;
-    caps.can_edit_party_a_contacts = canEditContacts;
-    caps.can_edit_party_b_contacts = canEditContacts;
-    if (reviewable) {
-      caps.can_approve = true;
-      caps.can_reject = true;
     }
     return applyMouFieldCapabilities(req, proposal, caps);
   }

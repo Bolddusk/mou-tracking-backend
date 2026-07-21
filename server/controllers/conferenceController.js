@@ -12,7 +12,16 @@ const {
 
 async function getActiveConferences(req, res) {
   try {
-    const conferences = await listActiveConferences();
+    let conferences = await listActiveConferences();
+    const { isGlobalRole, getMinistryFilter } = require('../utils/ministryScope');
+    const ministryId = getMinistryFilter(req.user, req.query.ministry_id);
+    if (ministryId) {
+      conferences = conferences.filter((c) => Number(c.ministry_id) === Number(ministryId));
+    } else if (!isGlobalRole(req.user) && req.user.ministry_id) {
+      conferences = conferences.filter(
+        (c) => Number(c.ministry_id) === Number(req.user.ministry_id)
+      );
+    }
     return res.json({
       conferences,
       items: conferences,

@@ -5,15 +5,22 @@ const {
   MAX_MESSAGE_LENGTH,
   getProposalForChat,
   proposalTitle,
-  saveChatMessage,
-  getChatMessages,
 } = require('../utils/proposalChatMessages');
+const {
+  ensureGroupConversation,
+  getConversationById,
+  checkConversationAccess,
+  getConversationMessages,
+  saveConversationMessage,
+} = require('../utils/proposalChatConversations');
 
 const CHAT_ROLES = new Set([
   'party_a',
   'party_b',
   'investor',
   'super_admin',
+  'admin',
+  'power_admin',
   'sector_lead',
   'regional_focal_point',
   'focal_point',
@@ -21,6 +28,14 @@ const CHAT_ROLES = new Set([
 
 function proposalRoom(proposalId) {
   return `proposal-chat:${proposalId}`;
+}
+
+function conversationRoom(conversationId) {
+  return `chat-conv:${conversationId}`;
+}
+
+function inboxRoom(proposalId) {
+  return `proposal-inbox:${proposalId}`;
 }
 
 function emitChatError(socket, code, message) {
@@ -81,33 +96,72 @@ function initProposalChat(httpServer) {
           return emitChatError(socket, 'ACCESS_DENIED', access.error);
         }
 
-        const room = proposalRoom(proposalId);
-        socket.join(room);
-        joinedRooms.add(room);
+        let conversation = null;
+        const conversationId = payload.conversationId
+          ? Number(payload.conversationId)
+          : null;
 
-        if (!roomUsers.has(room)) {
-          roomUsers.set(room, new Map());
+        if (conversationId) {
+          conversation = await getConversationById(conversationId);
+          const convAccess = await checkConversationAccess(
+            socket.user,
+            proposal,
+            conversation
+          );
+          if (!convAccess.ok) {
+            return emitChatError(socket, 'ACCESS_DENIED', convAccess.error);
+          }
+          if (
+            ['regional_focal_point', 'focal_point'].includes(socket.user.role) &&
+            conversation.type !== 'group'
+          ) {
+            return emitChatError(socket, 'ACCESS_DENIED', 'Access denied to this conversation');
+          }
+        } else {
+          conversation = await ensureGroupConversation(proposalId, proposal);
         }
-        roomUsers.get(room).set(socket.id, {
+
+        const convRoom = conversationRoom(conversation.id);
+        const legacyRoom = proposalRoom(proposalId);
+        const inbox = inboxRoom(proposalId);
+
+        socket.join(convRoom);
+        socket.join(inbox);
+        joinedRooms.add(convRoom);
+        joinedRooms.add(inbox);
+
+        // Legacy FE: also join proposal room when opening General
+        if (conversation.type === 'group') {
+          socket.join(legacyRoom);
+          joinedRooms.add(legacyRoom);
+        }
+
+        if (!roomUsers.has(convRoom)) {
+          roomUsers.set(convRoom, new Map());
+        }
+        roomUsers.get(convRoom).set(socket.id, {
           userId: socket.user.id,
           fullName: socket.user.full_name,
           role: socket.user.role,
         });
 
-        const messages = await getChatMessages(proposalId);
+        const messages = await getConversationMessages(conversation.id);
 
         socket.emit('chat:joined', {
           proposalId,
+          conversationId: conversation.id,
+          type: conversation.type,
           proposalTitle: proposalTitle(proposal),
-          online: presencePayload(roomUsers.get(room)),
+          online: presencePayload(roomUsers.get(convRoom)),
           messages,
           canSend: access.canSend !== false,
           party_b_linked: Boolean(proposal.party_b_user_id),
         });
 
-        socket.to(room).emit('chat:presence', {
+        socket.to(convRoom).emit('chat:presence', {
           proposalId,
-          online: presencePayload(roomUsers.get(room)),
+          conversationId: conversation.id,
+          online: presencePayload(roomUsers.get(convRoom)),
         });
       } catch (err) {
         console.error('chat:join error:', err.message);
@@ -117,6 +171,23 @@ function initProposalChat(httpServer) {
 
     socket.on('chat:leave', (payload = {}) => {
       const proposalId = Number(payload.proposalId);
+      const conversationId = payload.conversationId
+        ? Number(payload.conversationId)
+        : null;
+
+      if (conversationId) {
+        const convRoom = conversationRoom(conversationId);
+        socket.leave(convRoom);
+        joinedRooms.delete(convRoom);
+        removeFromRoom(convRoom, socket.id);
+        socket.to(convRoom).emit('chat:presence', {
+          proposalId: proposalId || null,
+          conversationId,
+          online: presencePayload(roomUsers.get(convRoom) || new Map()),
+        });
+        return;
+      }
+
       if (!proposalId) return;
 
       const room = proposalRoom(proposalId);
@@ -134,6 +205,9 @@ function initProposalChat(httpServer) {
       try {
         const proposalId = Number(payload.proposalId);
         const text = String(payload.text || '').trim();
+        let conversationId = payload.conversationId
+          ? Number(payload.conversationId)
+          : null;
 
         if (!proposalId) {
           return emitChatError(socket, 'INVALID_PROPOSAL', 'proposalId is required');
@@ -149,11 +223,6 @@ function initProposalChat(httpServer) {
           );
         }
 
-        const room = proposalRoom(proposalId);
-        if (!joinedRooms.has(room)) {
-          return emitChatError(socket, 'NOT_IN_ROOM', 'Join the chat room before sending messages');
-        }
-
         const proposal = await getProposalForChat(proposalId);
         const access = await checkApprovedPartyChatAccess(socket.user, proposal);
         if (access.error) {
@@ -162,10 +231,45 @@ function initProposalChat(httpServer) {
         if (access.canSend === false) {
           return emitChatError(socket, 'READ_ONLY', 'You have read-only access to this chat');
         }
+
+        let conversation;
+        if (conversationId) {
+          conversation = await getConversationById(conversationId);
+        } else {
+          conversation = await ensureGroupConversation(proposalId, proposal);
+          conversationId = conversation.id;
+        }
+
+        const convAccess = await checkConversationAccess(
+          socket.user,
+          proposal,
+          conversation
+        );
+        if (!convAccess.ok) {
+          return emitChatError(socket, 'ACCESS_DENIED', convAccess.error);
+        }
+        if (
+          ['regional_focal_point', 'focal_point'].includes(socket.user.role) &&
+          conversation.type !== 'group'
+        ) {
+          return emitChatError(socket, 'ACCESS_DENIED', 'Access denied to this conversation');
+        }
+
+        const convRoom = conversationRoom(conversationId);
+        const legacyRoom = proposalRoom(proposalId);
+        // Must have joined this conversation (or legacy general room)
+        const inConv = joinedRooms.has(convRoom);
+        const inLegacyGeneral =
+          conversation.type === 'group' && joinedRooms.has(legacyRoom);
+        if (!inConv && !inLegacyGeneral) {
+          return emitChatError(socket, 'NOT_IN_ROOM', 'Join the chat room before sending messages');
+        }
+
         let message;
         try {
-          message = await saveChatMessage({
+          message = await saveConversationMessage({
             proposalId,
+            conversationId,
             senderId: socket.user.id,
             senderRole: socket.user.role,
             text,
@@ -177,7 +281,17 @@ function initProposalChat(httpServer) {
           throw saveErr;
         }
 
-        io.to(room).emit('chat:message', message);
+        // DM isolation: only conversation room. Group also mirrors to legacy room.
+        io.to(convRoom).emit('chat:message', message);
+        if (conversation.type === 'group') {
+          io.to(legacyRoom).emit('chat:message', message);
+        }
+
+        io.to(inboxRoom(proposalId)).emit('chat:conversations_updated', {
+          proposalId,
+          conversationId,
+          lastMessage: message,
+        });
       } catch (err) {
         console.error('chat:message error:', err.message);
         emitChatError(socket, 'SEND_FAILED', 'Failed to send message');
@@ -186,9 +300,26 @@ function initProposalChat(httpServer) {
 
     socket.on('chat:typing', (payload = {}) => {
       const proposalId = Number(payload.proposalId);
+      const conversationId = payload.conversationId
+        ? Number(payload.conversationId)
+        : null;
       const isTyping = Boolean(payload.isTyping);
-      if (!proposalId) return;
 
+      if (conversationId) {
+        const convRoom = conversationRoom(conversationId);
+        if (!joinedRooms.has(convRoom)) return;
+        socket.to(convRoom).emit('chat:typing', {
+          proposalId: proposalId || null,
+          conversationId,
+          userId: socket.user.id,
+          fullName: socket.user.full_name,
+          role: socket.user.role,
+          isTyping,
+        });
+        return;
+      }
+
+      if (!proposalId) return;
       const room = proposalRoom(proposalId);
       if (!joinedRooms.has(room)) return;
 
@@ -204,11 +335,19 @@ function initProposalChat(httpServer) {
     socket.on('disconnect', () => {
       for (const room of joinedRooms) {
         removeFromRoom(room, socket.id);
-        const proposalId = Number(room.replace('proposal-chat:', ''));
-        io.to(room).emit('chat:presence', {
-          proposalId,
-          online: presencePayload(roomUsers.get(room) || new Map()),
-        });
+        if (room.startsWith('chat-conv:')) {
+          const conversationId = Number(room.replace('chat-conv:', ''));
+          io.to(room).emit('chat:presence', {
+            conversationId,
+            online: presencePayload(roomUsers.get(room) || new Map()),
+          });
+        } else if (room.startsWith('proposal-chat:')) {
+          const proposalId = Number(room.replace('proposal-chat:', ''));
+          io.to(room).emit('chat:presence', {
+            proposalId,
+            online: presencePayload(roomUsers.get(room) || new Map()),
+          });
+        }
       }
     });
 
@@ -222,8 +361,8 @@ function initProposalChat(httpServer) {
     }
   });
 
-  console.log('Socket.io proposal chat ready (messages persisted to DB)');
+  console.log('Socket.io proposal chat ready (conversations + persisted messages)');
   return io;
 }
 
-module.exports = { initProposalChat, proposalRoom };
+module.exports = { initProposalChat, proposalRoom, conversationRoom };

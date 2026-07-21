@@ -1,4 +1,4 @@
-const ADMIN_ARCHIVE_ROLES = new Set(['super_admin', 'admin']);
+const ADMIN_ARCHIVE_ROLES = new Set(['super_admin', 'admin', 'power_admin']);
 
 function isProposalArchived(proposal) {
   return Boolean(proposal?.deleted_at);

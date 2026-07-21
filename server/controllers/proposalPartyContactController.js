@@ -44,7 +44,11 @@ async function verifyPartyContactEditAccess(req, proposal) {
     return { error: 'Party contact details cannot be edited on draft proposals', status: 400 };
   }
 
-  if (req.user.role === 'super_admin' || req.user.role === 'admin') {
+  if (
+    req.user.role === 'super_admin' ||
+    req.user.role === 'admin' ||
+    req.user.role === 'power_admin'
+  ) {
     return {
       ok: true,
       proposal,
@@ -132,8 +136,16 @@ function buildPartyContactUpdates(body, existingProposal, scope = {}) {
     });
     updates.party_a_info = JSON.stringify(nextPartyAInfo);
 
-    if (body.party_a_info.organization_name !== undefined && nextPartyAInfo.organization_name) {
-      updates.company_name = nextPartyAInfo.organization_name;
+    // Only sync company_name when Party A org name actually changed
+    // (FE often resends full form; do not rewrite on email-only saves)
+    const prevOrg = String(existingPartyAInfo.organization_name || '').trim();
+    const nextOrg = String(nextPartyAInfo.organization_name || '').trim();
+    if (
+      body.party_a_info.organization_name !== undefined &&
+      nextOrg &&
+      nextOrg !== prevOrg
+    ) {
+      updates.company_name = nextOrg;
     }
   }
 
@@ -237,6 +249,12 @@ async function updateProposalPartyContacts(req, res) {
     });
   } catch (err) {
     console.error('Update proposal party contacts error:', err.message);
+    if (err.status === 400 || err.code === 'ministry_email_conflict') {
+      return res.status(400).json({
+        error: err.message,
+        code: err.code || 'ministry_email_conflict',
+      });
+    }
     return res.status(500).json({ error: 'Failed to update party contact details' });
   }
 }

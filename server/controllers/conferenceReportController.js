@@ -15,6 +15,7 @@ const { getActiveSectorNames } = require('../utils/sectorRegistry');
 const REPORT_ROLES = new Set([
   'super_admin',
   'admin',
+  'power_admin',
   'sector_lead',
   'party_a',
   'party_b',

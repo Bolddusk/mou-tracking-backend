@@ -10,7 +10,7 @@ const NAV_PERMISSION_BUNDLES = [
     label: 'All Opportunities',
     route: '/dashboard/super-admin',
     list_apis: [
-      { method: 'GET', path: '/api/proposals/all', permission: 'proposals.list_all', required: true, roles: ['super_admin', 'admin'] },
+      { method: 'GET', path: '/api/proposals/all', permission: 'proposals.list_all', required: true, roles: ['super_admin', 'admin', 'power_admin'] },
       { method: 'GET', path: '/api/proposals/sector-lead', permission: 'proposals.list_sector', required: true, roles: ['sector_lead'] },
       { method: 'GET', path: '/api/proposals/my', permission: 'proposals.list_own', required: true, roles: ['party_a', 'party_b'] },
       { method: 'GET', path: '/api/proposals/filter-options', permission: 'proposals.filter_options', required: true },
@@ -371,6 +371,8 @@ const BUNDLE_BY_NAV_KEY = Object.fromEntries(
 
 const LIST_SCOPE_BY_ROLE = {
   super_admin: 'proposals.list_all',
+  power_admin: 'proposals.list_all',
+  admin: 'proposals.list_all',
   sector_lead: 'proposals.list_sector',
   party_a: 'proposals.list_own',
   party_b: 'proposals.list_own',
@@ -382,16 +384,21 @@ const ALL_LIST_SCOPE_KEYS = [
   'proposals.list_own',
 ];
 
+const GLOBAL_LIST_ROLES = new Set(['super_admin', 'power_admin', 'admin']);
+
 /** Strip cross-role list grants so list/detail stay in sync. */
 function sanitizeRoleListPermissions(role, permissions = []) {
   const set = new Set(permissions);
   const correct = LIST_SCOPE_BY_ROLE[role];
 
-  if (role !== 'super_admin') {
+  if (!GLOBAL_LIST_ROLES.has(role)) {
     set.delete('proposals.list_all');
   }
 
-  if (!correct || role === 'super_admin') {
+  if (!correct || GLOBAL_LIST_ROLES.has(role)) {
+    if (GLOBAL_LIST_ROLES.has(role)) {
+      set.add('proposals.list_all');
+    }
     return [...set];
   }
 
@@ -482,7 +489,10 @@ function resolveProposalsListScope(user, permissions = []) {
   const role = user?.role;
   const perms = new Set(permissions);
 
-  if (role === 'super_admin' && (perms.has('proposals.list_all') || perms.has('nav.opportunities.all'))) {
+  if (
+    (role === 'super_admin' || role === 'power_admin' || role === 'admin') &&
+    (perms.has('proposals.list_all') || perms.has('nav.opportunities.all'))
+  ) {
     return { list_scope: 'all', proposals_list_api: '/api/proposals/all' };
   }
   if (role === 'sector_lead' && (perms.has('proposals.list_sector') || perms.has('nav.opportunities.all'))) {
@@ -495,6 +505,9 @@ function resolveProposalsListScope(user, permissions = []) {
     return { list_scope: 'own', proposals_list_api: '/api/proposals/my' };
   }
 
+  if (perms.has('proposals.list_all')) {
+    return { list_scope: 'all', proposals_list_api: '/api/proposals/all' };
+  }
   if (perms.has('proposals.list_sector')) {
     return { list_scope: 'sector', proposals_list_api: '/api/proposals/sector-lead' };
   }

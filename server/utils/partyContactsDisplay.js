@@ -21,7 +21,13 @@ function buildPartyAContactsDisplay(enriched) {
   const loginEmail = normalizeEmail(info.email);
 
   const items = dedupeContactItems([
-    { label: 'Company', value: enriched.company_name || info.organization_name },
+    {
+      label: 'Company',
+      value:
+        info.organization_name ||
+        enriched.company_name ||
+        info.contact_name,
+    },
     { label: 'Contact Person', value: info.contact_name },
     { label: 'Organization', value: info.organization_name },
     { label: 'Designation', value: info.designation },
@@ -42,7 +48,14 @@ function buildPartyBContactsDisplay(enriched) {
   const loginEmail = normalizeEmail(info.email || enriched.party_b_email);
 
   const items = dedupeContactItems([
-    { label: 'Company', value: enriched.venture_name || info.organization_name },
+    {
+      label: 'Company',
+      value:
+        info.organization_name ||
+        enriched.party_b_organization ||
+        info.contact_name ||
+        enriched.party_b_name,
+    },
     { label: 'Contact Person', value: info.contact_name },
     { label: 'Organization', value: info.organization_name },
     { label: 'Designation', value: info.designation },

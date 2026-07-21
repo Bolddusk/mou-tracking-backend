@@ -20,7 +20,7 @@ function canCloseProposalDeal(req, proposal) {
   if (!proposal || proposal.mou_status !== 'signed' || proposal.status === 'completed') {
     return false;
   }
-  if (req.user.role === 'super_admin') return true;
+  if (req.user.role === 'super_admin' || req.user.role === 'power_admin') return true;
   if (req.user.role === 'sector_lead') {
     return sectorLeadHasAnySector(req.user) && sectorLeadCoversSector(req.user, proposal.sector);
   }
@@ -31,7 +31,7 @@ function canCloseMatchDeal(req, match) {
   if (!match || match.mou_status !== 'signed') {
     return false;
   }
-  if (req.user.role === 'super_admin') return true;
+  if (req.user.role === 'super_admin' || req.user.role === 'power_admin') return true;
   if (req.user.role === 'sector_lead') {
     if (!sectorLeadHasAnySector(req.user)) return false;
     return sectorLeadCoversSector(req.user, match.sector) || match.matched_by === req.user.id;

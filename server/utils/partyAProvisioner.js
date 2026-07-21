@@ -19,9 +19,10 @@ function parsePartyAInfo(raw) {
 }
 
 async function findUserByEmail(email) {
-  const [rows] = await pool.query('SELECT id, email, role FROM users WHERE email = ?', [
-    email.trim().toLowerCase(),
-  ]);
+  const [rows] = await pool.query(
+    'SELECT id, email, role, ministry_id FROM users WHERE email = ?',
+    [email.trim().toLowerCase()]
+  );
   return rows[0] || null;
 }
 
@@ -59,6 +60,12 @@ async function provisionPartyAForProposal(proposal) {
     return result;
   }
 
+  if (!proposal.ministry_id) {
+    result.skipped = true;
+    result.reason = 'missing_proposal_ministry';
+    return result;
+  }
+
   let userId;
   let rawPassword = null;
 
@@ -71,8 +78,25 @@ async function provisionPartyAForProposal(proposal) {
       return result;
     }
 
-    // Existing account: only link to this MOU — do not reset password or re-send credentials
+    if (
+      existing.ministry_id &&
+      Number(existing.ministry_id) !== Number(proposal.ministry_id)
+    ) {
+      const err = new Error(
+        'This email is already registered under a different ministry'
+      );
+      err.status = 400;
+      err.code = 'ministry_email_conflict';
+      throw err;
+    }
+
     userId = existing.id;
+    if (!existing.ministry_id) {
+      await pool.query(`UPDATE users SET ministry_id = ? WHERE id = ?`, [
+        proposal.ministry_id,
+        userId,
+      ]);
+    }
     result.linked = true;
     result.user_id = userId;
     result.existing_account = true;
@@ -84,12 +108,13 @@ async function provisionPartyAForProposal(proposal) {
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
     const [insert] = await pool.query(
-      `INSERT INTO users (full_name, email, password, role, organization, phone, must_change_password)
-       VALUES (?, ?, ?, 'party_a', ?, ?, 1)`,
+      `INSERT INTO users (full_name, email, password, role, ministry_id, organization, phone, must_change_password)
+       VALUES (?, ?, ?, 'party_a', ?, ?, ?, 1)`,
       [
         contactName,
         email,
         hashedPassword,
+        proposal.ministry_id,
         partyAInfo.organization_name?.trim() || null,
         partyAInfo.phone?.trim() || null,
       ]

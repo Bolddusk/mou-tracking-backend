@@ -3,7 +3,7 @@ const { KNOWN_CONFERENCES } = require('../constants/conferences');
 
 const CONFERENCE_ENGAGEMENT_TYPES = ['B2B', 'B2G', 'G2B', 'G2G'];
 
-const CONFERENCE_SELECT = `id, conference_key, name, conference_date, conference_end_date,
+const CONFERENCE_SELECT = `id, ministry_id, conference_key, name, conference_date, conference_end_date,
               location, host, report_title, engagement_type, description,
               supports_report, is_active, sort_order, created_at, updated_at`;
 
@@ -19,6 +19,7 @@ function normalizeEngagementType(value) {
 function formatConferenceRow(row, usage = null) {
   const payload = {
     id: row.id,
+    ministry_id: row.ministry_id ?? null,
     key: row.conference_key,
     conference_key: row.conference_key,
     name: row.name,
@@ -227,6 +228,18 @@ async function createConference(body) {
   if (!key) return { error: 'conference_key is required', status: 400 };
   if (!name) return { error: 'name is required', status: 400 };
 
+  const ministryId = Number(body.ministry_id);
+  if (!ministryId) {
+    return { error: 'ministry_id is required', status: 400 };
+  }
+  const [ministryRows] = await pool.query(
+    `SELECT id FROM ministries WHERE id = ? AND is_active = 1`,
+    [ministryId]
+  );
+  if (!ministryRows[0]) {
+    return { error: 'Invalid or inactive ministry', status: 400 };
+  }
+
   const engagementType = normalizeEngagementType(body.engagement_type);
   if (body.engagement_type !== undefined && body.engagement_type !== null && body.engagement_type !== '') {
     if (engagementType === undefined) {
@@ -244,9 +257,10 @@ async function createConference(body) {
 
   const [result] = await pool.query(
     `INSERT INTO conferences
-      (conference_key, name, conference_date, conference_end_date, location, host, report_title, engagement_type, description, supports_report, sort_order, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      (ministry_id, conference_key, name, conference_date, conference_end_date, location, host, report_title, engagement_type, description, supports_report, sort_order, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     [
+      ministryId,
       key,
       name,
       body.conference_date || body.date || null,

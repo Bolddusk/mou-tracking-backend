@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/authRoutes');
+const ministryRoutes = require('./routes/ministryRoutes');
 const proposalRoutes = require('./routes/proposalRoutes');
 const matchmakingRoutes = require('./routes/matchmakingRoutes');
 const activityRoutes = require('./routes/activityRoutes');
@@ -55,6 +56,7 @@ app.get('/health', async (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/ministries', ministryRoutes);
 app.use('/api/proposals', proposalRoutes);
 app.use('/api/matchmaking', matchmakingRoutes);
 app.use('/api/activities', activityRoutes);

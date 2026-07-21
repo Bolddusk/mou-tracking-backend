@@ -264,7 +264,15 @@ async function getProposalMouStatus(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const allowedRoles = new Set(['party_a', 'party_b', 'investor', 'sector_lead', 'super_admin']);
+    const allowedRoles = new Set([
+      'party_a',
+      'party_b',
+      'investor',
+      'sector_lead',
+      'super_admin',
+      'admin',
+      'power_admin',
+    ]);
     if (!allowedRoles.has(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -527,7 +535,15 @@ async function getProposalMouVersions(req, res) {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const allowedRoles = new Set(['party_a', 'party_b', 'investor', 'sector_lead', 'super_admin']);
+    const allowedRoles = new Set([
+      'party_a',
+      'party_b',
+      'investor',
+      'sector_lead',
+      'super_admin',
+      'admin',
+      'power_admin',
+    ]);
     if (!allowedRoles.has(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }

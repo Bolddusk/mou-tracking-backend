@@ -26,7 +26,14 @@ const {
   exportProposalProgress,
   pokeForUpdate,
 } = require('../controllers/activityController');
-const { getProposalChatMessages } = require('../controllers/proposalChatController');
+const {
+  getProposalChatMessages,
+  listChatConversations,
+  listChatParticipants,
+  createDirectConversation,
+  getConversationMessagesHandler,
+  markConversationReadHandler,
+} = require('../controllers/proposalChatController');
 const { exportProposalReport } = require('../controllers/proposalReportController');
 const { getConferenceReport } = require('../controllers/conferenceReportController');
 const { getProposalSifcReport } = require('../controllers/proposalSifcReportController');
@@ -57,8 +64,8 @@ const {
 
 const router = express.Router();
 
-const proposalAuthorRoles = [verifyToken, requireRole('party_a', 'super_admin', 'admin')];
-const proposalDeleteRoles = [verifyToken, requireRole('party_a', 'super_admin', 'admin')];
+const proposalAuthorRoles = [verifyToken, requireRole('party_a', 'super_admin', 'admin', 'power_admin')];
+const proposalDeleteRoles = [verifyToken, requireRole('party_a', 'super_admin', 'admin', 'power_admin')];
 const partyMyProposals = [verifyToken, requireAnyPermission('proposals.list_own', 'proposals.view_own')];
 const sectorLeadList = [
   verifyToken,
@@ -66,13 +73,13 @@ const sectorLeadList = [
 ];
 const allProposalsList = [
   verifyToken,
-  requireRole('super_admin', 'admin'),
+  requireRole('super_admin', 'admin', 'power_admin'),
   requireAnyPermission('proposals.list_all'),
 ];
-const changeLogMouOptionsRoles = [verifyToken, requireRole('super_admin', 'admin')];
+const changeLogMouOptionsRoles = [verifyToken, requireRole('super_admin', 'admin', 'power_admin')];
 const changeLogFilterOptionsRoles = [
   verifyToken,
-  requireRole('super_admin', 'admin', 'sector_lead'),
+  requireRole('super_admin', 'admin', 'power_admin', 'sector_lead'),
 ];
 const changeLogExportRoles = [
   verifyToken,
@@ -98,11 +105,11 @@ const reviewerListRoles = [
 ];
 const approveProposalRoles = [verifyToken, requireAnyPermission('proposals.approve')];
 const rejectProposalRoles = [verifyToken, requireAnyPermission('proposals.reject')];
-const archiveProposalRoles = [verifyToken, requireRole('super_admin', 'admin')];
+const archiveProposalRoles = [verifyToken, requireRole('super_admin', 'admin', 'power_admin')];
 const exportReportRoles = [verifyToken, requireAnyPermission('proposals.export')];
 const conferenceReportRoles = [
   verifyToken,
-  requireRole('super_admin', 'admin', 'sector_lead', 'party_a', 'party_b', 'investor'),
+  requireRole('super_admin', 'admin', 'power_admin', 'sector_lead', 'party_a', 'party_b', 'investor'),
 ];
 const editContactsRoles = [
   verifyToken,
@@ -121,16 +128,16 @@ const activitiesCreateRoles = [verifyToken, requireAnyPermission('proposals.acti
 const messagesViewRoles = [verifyToken, requireAnyPermission('proposals.messages.view')];
 const activityRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'regional_focal_point'),
+  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'power_admin', 'regional_focal_point'),
 ];
 const mouViewRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'admin', 'regional_focal_point'),
+  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'admin', 'power_admin', 'regional_focal_point'),
 ];
 const mouAckRoles = [verifyToken, requireRole('party_a', 'party_b', 'investor')];
 const mouStatusViewRoles = [
   verifyToken,
-  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'admin'),
+  requireRole('party_a', 'party_b', 'investor', 'sector_lead', 'super_admin', 'admin', 'power_admin'),
 ];
 
 const partyAResubmit = [verifyToken, requireRole('party_a')];
@@ -165,6 +172,19 @@ router.get('/:proposalId/activities', ...activitiesViewRoles, getProposalActivit
 router.get('/:proposalId/progress/export', ...activitiesViewRoles, exportProposalProgress);
 router.get('/:id/progress/export', ...activitiesViewRoles, exportProposalProgress);
 router.get('/:proposalId/messages', ...messagesViewRoles, getProposalChatMessages);
+router.get('/:proposalId/chat/conversations', ...messagesViewRoles, listChatConversations);
+router.get('/:proposalId/chat/participants', ...messagesViewRoles, listChatParticipants);
+router.post('/:proposalId/chat/conversations', ...messagesViewRoles, createDirectConversation);
+router.get(
+  '/:proposalId/chat/conversations/:conversationId/messages',
+  ...messagesViewRoles,
+  getConversationMessagesHandler
+);
+router.post(
+  '/:proposalId/chat/conversations/:conversationId/read',
+  ...messagesViewRoles,
+  markConversationReadHandler
+);
 router.post('/:proposalId/poke', ...approveProposalRoles, pokeForUpdate);
 
 // Proposal review
@@ -182,7 +202,10 @@ router.get('/:id/change-logs', ...proposalViewRoles, getProposalChangeLogs);
 router.get('/:id/sifc-report', ...conferenceReportRoles, getProposalSifcReport);
 router.get('/:id/export-report', ...exportReportRoles, exportProposalReport);
 
-const mouUploadRoles = [verifyToken, requireRole('party_a', 'party_b', 'sector_lead', 'super_admin', 'admin')];
+const mouUploadRoles = [
+  verifyToken,
+  requireRole('party_a', 'party_b', 'sector_lead', 'super_admin', 'admin', 'power_admin'),
+];
 const dealCloseRoles = [verifyToken, requireAnyPermission('proposals.deal_close')];
 
 // Direct opportunity MOU (Party A fills all — legacy proposals table)

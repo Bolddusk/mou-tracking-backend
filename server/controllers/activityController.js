@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { checkProposalAccess } = require('../utils/proposalAccess');
+const { checkProposalAccess, buildProposalCapabilities } = require('../utils/proposalAccess');
 const { getPublicFileUrl } = require('../middleware/upload');
 const { isProposalLocked, PROPOSAL_LOCKED_ERROR } = require('../utils/dealClose');
 const {
@@ -40,7 +40,7 @@ const PROPOSAL_SELECT = `
 
 const POKE_TITLE_LEGACY = POKE_TITLE;
 const ACTIVITY_ROLES = ['party_a', 'sector_lead', 'super_admin', 'admin'];
-const REVIEWER_ROLES_LEGACY = ['sector_lead', 'super_admin'];
+const REVIEWER_ROLES_LEGACY = ['sector_lead', 'super_admin', 'admin', 'power_admin'];
 
 const ACTIVITY_SELECT = `
   SELECT a.*,
@@ -283,7 +283,12 @@ async function getProposalActivities(req, res) {
     );
 
     const activities = await enrichActivities(rows);
-    return res.json(buildProgressListPayload(activities, req.user));
+    const caps = buildProposalCapabilities(req, proposal, access);
+    return res.json({
+      ...buildProgressListPayload(activities, req.user),
+      can_add_progress: Boolean(caps.can_add_activity),
+      can_comment: Boolean(caps.can_comment),
+    });
   } catch (err) {
     console.error('Get activities error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch activities' });
@@ -292,7 +297,7 @@ async function getProposalActivities(req, res) {
 
 async function pokeForUpdate(req, res) {
   try {
-    if (!REVIEWER_ROLES_LEGACY.includes(req.user.role) && req.user.role !== 'admin') {
+    if (!REVIEWER_ROLES.has(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -940,8 +945,8 @@ async function promotePokeToProgress(req, res) {
 
 async function dismissUpdateRequestActivity(req, res) {
   try {
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only Super Admin can dismiss update requests' });
+    if (req.user.role !== 'super_admin' && req.user.role !== 'power_admin') {
+      return res.status(403).json({ error: 'Only Super Admin or Power Admin can dismiss update requests' });
     }
 
     const activity = await getActivityById(req.params.activityId);
@@ -969,8 +974,8 @@ async function dismissUpdateRequestActivity(req, res) {
 
 async function dismissAllPendingUpdateRequestsHandler(req, res) {
   try {
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only Super Admin can clear pending update requests' });
+    if (req.user.role !== 'super_admin' && req.user.role !== 'power_admin') {
+      return res.status(403).json({ error: 'Only Super Admin or Power Admin can clear pending update requests' });
     }
 
     const result = await dismissAllPendingUpdateRequests(req.user.id);

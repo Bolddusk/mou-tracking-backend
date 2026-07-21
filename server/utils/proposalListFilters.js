@@ -173,6 +173,14 @@ function buildProposalListWhere(query, options = {}) {
     params.push(query.date_to);
   }
 
+  if (options.ministryId) {
+    conditions.push('p.ministry_id = ?');
+    params.push(Number(options.ministryId));
+  } else if (query.ministry_id) {
+    conditions.push('p.ministry_id = ?');
+    params.push(Number(query.ministry_id));
+  }
+
   if (!conditions.length) {
     return { sql: '', params };
   }
@@ -240,6 +248,7 @@ function buildListFiltersEcho(query, options = {}) {
     status: query.status || null,
     sector: scopedSectors?.length === 1 ? scopedSectors[0] : query.sector || null,
     sectors: scopedSectors?.length > 1 ? scopedSectors : null,
+    ministry_id: options.ministryId || query.ministry_id || null,
     mou_lifecycle: query.mou_lifecycle || null,
     q: query.q || null,
     date_from: query.date_from || null,

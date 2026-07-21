@@ -10,6 +10,7 @@ const FALLBACK_REDIRECT_BY_ROLE = {
   party_b: '/dashboard/party-b',
   sector_lead: '/dashboard/sector-lead',
   super_admin: '/dashboard/super-admin',
+  power_admin: '/dashboard/super-admin',
   admin: '/dashboard/admin',
   regional_focal_point: '/dashboard/regional-focal',
   focal_point: '/dashboard/focal-point',
@@ -17,7 +18,7 @@ const FALLBACK_REDIRECT_BY_ROLE = {
 };
 
 const USER_SELECT =
-  'id, full_name, email, password, role, sector, country, organization, phone, must_change_password, created_at';
+  'id, full_name, email, password, role, ministry_id, sector, country, organization, phone, must_change_password, created_at';
 
 function signToken(user) {
   return jwt.sign(
@@ -25,6 +26,7 @@ function signToken(user) {
       id: user.id,
       email: user.email,
       role: user.role,
+      ministry_id: user.ministry_id || null,
       sector: user.sector || null,
       country: user.country || null,
       full_name: user.full_name,
@@ -41,6 +43,9 @@ function publicUser(user) {
     email: user.email,
     role: user.role,
     role_label: ROLE_LABELS[user.role] || user.role,
+    ministry_id: user.ministry_id ?? null,
+    ministry: user.ministry || null,
+    is_global: user.role === 'super_admin' || user.role === 'power_admin',
     sector: user.sector || null,
     country: user.country || null,
     organization: user.organization,
@@ -66,6 +71,12 @@ function resolveRedirect(user, rbac) {
 
 async function authResponse(user) {
   const enriched = await attachSectorLeadSectors(user);
+  if (enriched.ministry_id) {
+    const { getMinistryById, formatMinistry } = require('../utils/ministryScope');
+    enriched.ministry = formatMinistry(await getMinistryById(enriched.ministry_id));
+  } else {
+    enriched.ministry = null;
+  }
   const rbac = await buildRbacPayload(enriched);
   return {
     token: signToken(enriched),
@@ -87,10 +98,18 @@ async function register(req, res) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const { getMinistryByCode } = require('../utils/ministryScope');
+    const mnfsr = await getMinistryByCode('mnfsr');
+    if (!mnfsr) {
+      return res.status(500).json({
+        error: 'Default ministry not configured. Run: npm run db:migrate:ministries',
+      });
+    }
+
     const [result] = await pool.query(
-      `INSERT INTO users (full_name, email, password, role, organization, phone)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [full_name, email, hashedPassword, role, organization, phone]
+      `INSERT INTO users (full_name, email, password, role, ministry_id, organization, phone)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [full_name, email, hashedPassword, role, mnfsr.id, organization, phone]
     );
 
     const user = {
@@ -98,6 +117,7 @@ async function register(req, res) {
       full_name,
       email,
       role,
+      ministry_id: mnfsr.id,
       sector: null,
       country: null,
       organization,

@@ -236,7 +236,7 @@ function formatCommentsDetail(comments = []) {
 }
 
 function isAdminRole(role) {
-  return ['super_admin', 'admin'].includes(role);
+  return ['super_admin', 'admin', 'power_admin'].includes(role);
 }
 
 function resolveProgressCapabilities(activity, user) {
